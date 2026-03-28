@@ -485,9 +485,9 @@ function renderAll() {
   const content = document.getElementById('content');
   const stats   = document.getElementById('stats');
 
-  if (selectedId && tree) {
+  if (tree) {
     stats.style.display = 'none';
-    content.innerHTML = renderNodeDetail(tree, selectedId);
+    content.innerHTML = renderNodeDetail(tree, selectedId ?? tree.root_id);
   } else if (screen === 'building' && buildProgress) {
     const headerColor = buildProgress.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
     const headerLabel = buildProgress.gitEnabled ? 'building with git' : 'building';
@@ -516,7 +516,7 @@ function activateDemo() {
   document.getElementById('pulse').className = 'pulse';
   document.getElementById('hdr-screen').textContent = 'demo';
   state = DEMO_STATE;
-  selectedId = 'n4';
+  selectedId = null;
   renderAll();
 }
 
