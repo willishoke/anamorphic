@@ -176,6 +176,47 @@ main { flex: 1; display: flex; overflow: hidden; }
 .empty { text-align: center; padding: 60px 20px; color: var(--dim); line-height: 2; }
 .empty .big { font-size: 32px; margin-bottom: 12px; }
 
+/* ── Sidebar tabs ── */
+.sidebar-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px 10px;
+}
+.sidebar-tab {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .7px;
+  padding: 4px 0;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--dim);
+  border: 1px solid transparent;
+  transition: all .1s;
+}
+.sidebar-tab:hover { color: var(--text); }
+.sidebar-tab.active { color: var(--text); border-color: var(--border); background: var(--bg3); }
+
+/* ── Epoch sidebar ── */
+.epoch-group { margin-bottom: 6px; }
+.epoch-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  transition: background .1s;
+}
+.epoch-group-header:hover { background: var(--bg3); }
+.epoch-group-nodes { margin-left: 8px; border-left: 1px solid var(--border); padding-left: 6px; margin-top: 1px; }
+
 /* ── Stats bar ── */
 .stats { display: flex; gap: 16px; font-size: 12px; color: var(--dim); padding: 10px 14px; background: var(--bg2); border-top: 1px solid var(--border); flex-shrink: 0; }
 .stats span b { color: var(--text); }
@@ -193,8 +234,12 @@ main { flex: 1; display: flex; overflow: hidden; }
 
 <main>
   <div class="sidebar">
-    <div class="sidebar-title">tree</div>
-    <div id="tree-root"><div class="empty"><div>no tree yet</div></div></div>
+    <div class="sidebar-tabs">
+      <div class="sidebar-tab active" id="tab-tree" onclick="setTab('tree')">tree</div>
+      <div class="sidebar-tab" id="tab-epochs" onclick="setTab('epochs')">epochs</div>
+    </div>
+    <div id="sidebar-tree"><div class="empty" style="padding:20px"><div>no tree yet</div></div></div>
+    <div id="sidebar-epochs" style="display:none"><div class="empty" style="padding:20px"><div>no epochs yet</div></div></div>
   </div>
   <div class="content" id="content">
     <div class="empty">
@@ -254,6 +299,15 @@ const trunc = (s, n) => s.length > n ? s.slice(0, n) + '…' : s;
 // ── state ─────────────────────────────────────────────────────────────────────
 let state = {};
 let selectedId = null;
+let sidebarTab = 'tree';
+
+function setTab(tab) {
+  sidebarTab = tab;
+  document.getElementById('tab-tree').className   = 'sidebar-tab' + (tab === 'tree'   ? ' active' : '');
+  document.getElementById('tab-epochs').className = 'sidebar-tab' + (tab === 'epochs' ? ' active' : '');
+  document.getElementById('sidebar-tree').style.display   = tab === 'tree'   ? '' : 'none';
+  document.getElementById('sidebar-epochs').style.display = tab === 'epochs' ? '' : 'none';
+}
 
 // ── node status from build progress ──────────────────────────────────────────
 function nodeStatus(nodeId) {
@@ -307,6 +361,41 @@ function renderTreeNode(tree, nodeId, depth) {
 function selectNode(id) {
   selectedId = selectedId === id ? null : id;
   renderAll();
+}
+
+// ── epoch sidebar ────────────────────────────────────────────────────────────
+function renderEpochSidebar(tree, bp) {
+  if (!bp || !bp.epochs.length) return '<div class="empty" style="padding:20px"><div>no epochs yet</div></div>';
+
+  return bp.epochs.map((epoch, ei) => {
+    const isActive = ei === bp.activeEpoch;
+    const isPast   = ei <  bp.activeEpoch;
+    const badgeClass = isActive ? 'active' : isPast ? 'done' : '';
+    const badgeLabel = isActive ? 'running' : isPast ? 'done' : 'waiting';
+    const colors = { waiting:'var(--dim)', running:'var(--cyan)', done:'var(--green)', error:'var(--red)' };
+    const icons  = { waiting:'○', running:'◉', done:'✓', error:'✗' };
+
+    const nodes = epoch.nodes.map(n => {
+      const isSelected = n.nodeId === selectedId;
+      const color = colors[n.status] ?? 'var(--dim)';
+      const icon  = icons[n.status]  ?? '○';
+      return `
+        <div class="tree-row${isSelected ? ' selected' : ''}" onclick="selectNode('${n.nodeId}')">
+          <span style="color:${color};font-size:12px;width:12px;flex-shrink:0">${icon}</span>
+          <span class="node-label" title="${esc(n.problem)}">${esc(trunc(n.problem, 26))}</span>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="epoch-group">
+        <div class="epoch-group-header">
+          epoch ${ei + 1}
+          <span class="badge ${badgeClass}">${badgeLabel}</span>
+          <span style="margin-left:auto;font-size:10px">${epoch.nodes.length}</span>
+        </div>
+        <div class="epoch-group-nodes">${nodes}</div>
+      </div>`;
+  }).join('');
 }
 
 // ── build progress ─────────────────────────────────────────────────────────
@@ -473,13 +562,11 @@ function renderAll() {
     pill.style.display = 'none';
   }
 
-  // tree sidebar
-  const treeRoot = document.getElementById('tree-root');
-  if (tree) {
-    treeRoot.innerHTML = renderTreeNode(tree, tree.root_id, 0);
-  } else {
-    treeRoot.innerHTML = '<div class="empty" style="padding:20px">no tree yet</div>';
-  }
+  // sidebars
+  const sidebarTree   = document.getElementById('sidebar-tree');
+  const sidebarEpochs = document.getElementById('sidebar-epochs');
+  sidebarTree.innerHTML   = tree ? renderTreeNode(tree, tree.root_id, 0) : '<div class="empty" style="padding:20px"><div>no tree yet</div></div>';
+  sidebarEpochs.innerHTML = renderEpochSidebar(tree, state.buildProgress);
 
   // content
   const content = document.getElementById('content');
