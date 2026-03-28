@@ -4,6 +4,7 @@
  */
 import { spawn } from 'child_process';
 import type { ChildProcess } from 'child_process';
+import type { RootAnalysis } from './types.js';
 import { createInterface } from 'readline';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -52,10 +53,10 @@ export class Bridge {
     });
   }
 
-  async analyzeRoot(problem: string): Promise<string> {
+  async analyzeRoot(problem: string): Promise<RootAnalysis> {
     const r = await this.call('analyze_root', { problem });
     if (r['error']) throw new Error(r['error'] as string);
-    return r['markdown'] as string;
+    return r['analysis'] as RootAnalysis;
   }
 
   async assess(problem: string): Promise<boolean> {

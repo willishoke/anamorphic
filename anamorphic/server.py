@@ -24,8 +24,8 @@ def handle(req: dict, llm: LLMClient) -> dict:
     rid = req.get("id", "0")
 
     if action == "analyze_root":
-        md = llm.analyze_root(req["problem"])
-        return {"id": rid, "markdown": md}
+        analysis = llm.analyze_root(req["problem"])
+        return {"id": rid, "analysis": analysis}
 
     elif action == "assess":
         return {"id": rid, "is_leaf": llm.assess(req["problem"])}

@@ -10,7 +10,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from 'ink';
 import { Bridge } from './lib/bridge.js';
 import { AppScreen, TreeData, NodeData } from './lib/types.js';
-import { schemaToLines, decompositionToLines, Line } from './lib/schemaToLines.js';
+import { rootAnalysisToLines, schemaToLines, decompositionToLines, Line } from './lib/schemaToLines.js';
+import type { RootAnalysis } from './lib/types.js';
 import InputScreen from './screens/InputScreen.js';
 import ReviewScreen from './screens/ReviewScreen.js';
 import TraversalScreen from './screens/TraversalScreen.js';
@@ -64,9 +65,9 @@ export default function App() {
     const rootNode = makeNode(rootId, query, null, 0);
     treeRef.current = { root_id: rootId, nodes: { [rootId]: rootNode } };
 
-    const markdown = await bridge.current!.analyzeRoot(query);
+    const analysis = await bridge.current!.analyzeRoot(query);
     setLoading(false);
-    setScreen({ tag: 'root_review', problem: query, markdown });
+    setScreen({ tag: 'root_review', problem: query, analysis });
   }, []);
 
   // ---- root review: approve / refine --------------------------------------
@@ -81,9 +82,9 @@ export default function App() {
   const handleRootRefine = useCallback(async (feedback: string) => {
     setLoading(true);
     const s = screen as Extract<AppScreen, { tag: 'root_review' }>;
-    const markdown = await bridge.current!.analyzeRoot(`${s.problem}\n\nUser refinement: ${feedback}`);
+    const analysis = await bridge.current!.analyzeRoot(`${s.problem}\n\nUser refinement: ${feedback}`);
     setLoading(false);
-    setScreen({ tag: 'root_review', problem: s.problem, markdown });
+    setScreen({ tag: 'root_review', problem: s.problem, analysis });
   }, [screen]);
 
   // ---- traversal: advance to next node ------------------------------------
@@ -222,10 +223,11 @@ export default function App() {
   }
 
   if (screen.tag === 'root_review') {
+    const s = screen as Extract<AppScreen, { tag: 'root_review' }>;
     return (
       <ReviewScreen
         title="Root Problem Analysis"
-        markdown={(screen as any).markdown}
+        lines={loading ? [] : rootAnalysisToLines(s.problem, s.analysis)}
         loading={loading}
         onApprove={handleRootApprove}
         onRefine={handleRootRefine}

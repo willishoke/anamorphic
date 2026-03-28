@@ -1,28 +1,27 @@
-/**
- * Shows LLM-generated markdown for a node and lets the user
- * approve or type refinement feedback.
- */
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { Line } from '../lib/schemaToLines.js';
 
 interface Props {
-  title: string;           // header label (e.g. "Root Problem Analysis")
-  markdown: string;        // raw markdown text from LLM
-  loading: boolean;        // true while LLM is generating / refining
+  title: string;
+  lines: Line[];
+  loading: boolean;
   onApprove: () => void;
   onRefine: (feedback: string) => void;
 }
 
 type Mode = 'view' | 'input';
 
-export default function ReviewScreen({ title, markdown, loading, onApprove, onRefine }: Props) {
+export default function ReviewScreen({ title, lines, loading, onApprove, onRefine }: Props) {
   const [mode, setMode] = useState<Mode>('view');
   const [feedback, setFeedback] = useState('');
   const [scroll, setScroll] = useState(0);
 
-  const lines = markdown.split('\n');
-  const visibleLines = lines.slice(scroll, scroll + 24);
+  const visible = lines.slice(scroll, scroll + 24);
   const canScrollDown = scroll + 24 < lines.length;
+
+  // reset scroll when content changes
+  React.useEffect(() => { setScroll(0); setMode('view'); }, [lines]);
 
   useInput((char, key) => {
     if (loading) return;
@@ -31,7 +30,7 @@ export default function ReviewScreen({ title, markdown, loading, onApprove, onRe
       if (key.return || char === 'a') { onApprove(); return; }
       if (char === 'r') { setMode('input'); return; }
       if (key.downArrow || char === 'j') setScroll((s) => canScrollDown ? s + 1 : s);
-      if (key.upArrow || char === 'k') setScroll((s) => Math.max(0, s - 1));
+      if (key.upArrow   || char === 'k') setScroll((s) => Math.max(0, s - 1));
       if (char === 'd') setScroll((s) => canScrollDown ? Math.min(s + 8, lines.length - 1) : s);
       if (char === 'u') setScroll((s) => Math.max(0, s - 8));
     }
@@ -39,12 +38,7 @@ export default function ReviewScreen({ title, markdown, loading, onApprove, onRe
     if (mode === 'input') {
       if (key.return) {
         const trimmed = feedback.trim();
-        if (trimmed) {
-          onRefine(trimmed);
-          setFeedback('');
-          setMode('view');
-          setScroll(0);
-        }
+        if (trimmed) { onRefine(trimmed); setFeedback(''); setMode('view'); }
         return;
       }
       if (key.escape) { setMode('view'); setFeedback(''); return; }
@@ -55,13 +49,11 @@ export default function ReviewScreen({ title, markdown, loading, onApprove, onRe
 
   return (
     <Box flexDirection="column" paddingLeft={2} paddingTop={1}>
-      {/* Header */}
       <Box marginBottom={1}>
         <Text bold color="cyan">{title}</Text>
         {loading && <Text dimColor>  generating…</Text>}
       </Box>
 
-      {/* Content */}
       <Box
         flexDirection="column"
         borderStyle="single"
@@ -72,23 +64,23 @@ export default function ReviewScreen({ title, markdown, loading, onApprove, onRe
         {loading ? (
           <Text dimColor>Please wait…</Text>
         ) : (
-          visibleLines.map((line, i) => <MarkdownLine key={i} text={line} />)
+          visible.map((line, i) => (
+            <Text key={i} color={line.color as any} bold={line.bold} dimColor={line.dim}>
+              {line.text || ' '}
+            </Text>
+          ))
         )}
       </Box>
 
-      {/* Scroll hint */}
       {!loading && lines.length > 24 && (
-        <Text dimColor>  line {scroll + 1}/{lines.length}  [j/k] scroll  [u/d] page</Text>
+        <Text dimColor>  {scroll + 1}/{lines.length}  [j/k] scroll  [u/d] page</Text>
       )}
 
-      {/* Action bar / feedback input */}
-      <Box marginTop={1} flexDirection="column">
+      <Box marginTop={1}>
         {mode === 'view' ? (
           <Text>
-            <Text color="green" bold>[a/↵]</Text>
-            <Text> approve  </Text>
-            <Text color="yellow" bold>[r]</Text>
-            <Text> refine</Text>
+            <Text color="green" bold>[a/↵]</Text><Text> approve  </Text>
+            <Text color="yellow" bold>[r]</Text><Text> refine</Text>
           </Text>
         ) : (
           <Box flexDirection="column">
@@ -101,13 +93,4 @@ export default function ReviewScreen({ title, markdown, loading, onApprove, onRe
       </Box>
     </Box>
   );
-}
-
-function MarkdownLine({ text }: { text: string }) {
-  if (text.startsWith('## ')) return <Text bold color="cyan">{text}</Text>;
-  if (text.startsWith('# '))  return <Text bold color="cyan">{text}</Text>;
-  if (text.startsWith('- ') || text.startsWith('* ')) return <Text>{text}</Text>;
-  if (/^\d+\./.test(text)) return <Text>{text}</Text>;
-  if (text.trim() === '') return <Text> </Text>;
-  return <Text>{text}</Text>;
 }

@@ -83,25 +83,23 @@ Use exactly this structure:
         text = self._call(prompt, max_tokens=2000)
         return extract_yaml(text)
 
-    def analyze_root(self, problem: str) -> str:
-        """Produce a structured markdown analysis of the root problem."""
+    def analyze_root(self, problem: str) -> dict:
+        """Produce a structured analysis of the root problem. Returns a dict."""
+        from .schema import extract_yaml
         prompt = f"""You are analyzing a software problem before breaking it down.
 
 Problem:
 {problem}
 
-Write a concise structured markdown analysis with these sections:
-## Problem Statement
-(restate clearly in 1-2 sentences)
+Respond with ONLY valid YAML — no markdown fences, no explanation, no extra text.
+Use exactly this structure:
 
-## Key Components
-(bullet list of the major pieces involved)
-
-## Scope Assessment
-(1-2 sentences on size/complexity and why decomposition is needed)
-
-Be specific and technical. This is shown to the user for approval before decomposition begins."""
-        return self._call(prompt, max_tokens=800)
+problem_statement: <restate the problem clearly in 1-2 sentences>
+key_components:
+  - <major component or concern>
+  - <another component>
+scope_assessment: <1-2 sentences on size/complexity and why decomposition is needed>"""
+        return extract_yaml(self._call(prompt, max_tokens=600))
 
     def refine_plan(self, problem: str, schema: dict, feedback: str) -> dict:
         """Revise a structured plan based on user feedback."""

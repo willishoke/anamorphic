@@ -2,13 +2,41 @@
  * Renders a LeafSchema or a decomposition list into colored line objects
  * for display in Ink without any LLM calls.
  */
-import { LeafSchema, NodeData, TreeData } from './types.js';
+import { LeafSchema, NodeData, TreeData, RootAnalysis } from './types.js';
 
 export interface Line {
   text: string;
   color?: string;
   bold?: boolean;
   dim?: boolean;
+}
+
+export function rootAnalysisToLines(problem: string, analysis: RootAnalysis): Line[] {
+  const lines: Line[] = [];
+  lines.push({ text: problem, bold: true });
+  lines.push({ text: '' });
+
+  if (analysis.problem_statement) {
+    lines.push({ text: '── Problem Statement', color: 'cyan', bold: true });
+    lines.push({ text: analysis.problem_statement });
+    lines.push({ text: '' });
+  }
+
+  if (analysis.key_components?.length) {
+    lines.push({ text: '── Key Components', color: 'cyan', bold: true });
+    for (const c of analysis.key_components) {
+      lines.push({ text: `  · ${c}` });
+    }
+    lines.push({ text: '' });
+  }
+
+  if (analysis.scope_assessment) {
+    lines.push({ text: '── Scope Assessment', color: 'cyan', bold: true });
+    lines.push({ text: analysis.scope_assessment, dim: true });
+    lines.push({ text: '' });
+  }
+
+  return lines;
 }
 
 export function schemaToLines(problem: string, schema: LeafSchema): Line[] {

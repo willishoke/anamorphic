@@ -43,10 +43,16 @@ export interface TreeData {
   nodes: Record<string, NodeData>;
 }
 
+export interface RootAnalysis {
+  problem_statement?: string;
+  key_components?: string[];
+  scope_assessment?: string;
+}
+
 // ---- App state machine ----
 
 export type AppScreen =
   | { tag: 'input' }
-  | { tag: 'root_review'; problem: string; markdown: string }
+  | { tag: 'root_review'; problem: string; analysis: RootAnalysis }
   | { tag: 'traversing'; tree: TreeData; currentId: string; nodeMarkdown: string }
   | { tag: 'explore'; tree: TreeData };
