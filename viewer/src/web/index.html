@@ -53,6 +53,16 @@ header .pill {
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); margin-left: auto; }
 .pulse.live { background: var(--green); box-shadow: 0 0 6px var(--green); animation: glow 2s ease-in-out infinite; }
 @keyframes glow { 0%,100%{opacity:1} 50%{opacity:.5} }
+.demo-banner {
+  background: color-mix(in srgb, var(--yellow) 12%, transparent);
+  border-bottom: 1px solid var(--yellow);
+  color: var(--yellow);
+  font-size: 11px;
+  text-align: center;
+  padding: 5px 12px;
+  letter-spacing: .4px;
+  flex-shrink: 0;
+}
 
 /* ── Layout ── */
 main { flex: 1; display: flex; overflow: hidden; }
@@ -173,6 +183,7 @@ main { flex: 1; display: flex; overflow: hidden; }
 </head>
 <body>
 
+<div class="demo-banner" id="demo-banner" style="display:none">demo mode — <a href="https://github.com/willishoke/anamorphic" style="color:var(--yellow)">run locally</a> to connect your own session</div>
 <header>
   <span class="logo">anamorphic</span>
   <span class="screen" id="hdr-screen">connecting…</span>
@@ -197,6 +208,45 @@ main { flex: 1; display: flex; overflow: hidden; }
 <div class="stats" id="stats" style="display:none"></div>
 
 <script>
+// ── demo state ────────────────────────────────────────────────────────────────
+const DEMO_STATE = {
+  screen: 'building',
+  tree: {
+    root_id: 'n0',
+    nodes: {
+      n0: { id:'n0', problem:'Build a URL shortener service', parent_id:null, children:['n1','n2','n3'], is_leaf:false, depth:0, plan:null, dependencies:[], schema:null },
+      n1: { id:'n1', problem:'HTTP server & routing layer', parent_id:'n0', children:['n4','n5'], is_leaf:false, depth:1, plan:null, dependencies:[], schema:null },
+      n2: { id:'n2', problem:'Storage & redirect logic', parent_id:'n0', children:['n6','n7'], is_leaf:false, depth:1, plan:null, dependencies:[], schema:null },
+      n3: { id:'n3', problem:'Analytics & click tracking', parent_id:'n0', children:['n8'], is_leaf:false, depth:1, plan:null, dependencies:['n2'], schema:null },
+      n4: { id:'n4', problem:'Parse & validate incoming requests', parent_id:'n1', children:[], is_leaf:true, depth:2, plan:null, dependencies:[], schema:{ summary:'Validates URLs, extracts slugs, returns structured request objects.', functions:[{name:'parseRequest',signature:'parseRequest(req: Request): ParsedReq',purpose:'Decode path, query params, and body'},{name:'validateUrl',signature:'validateUrl(raw: string): URL | null',purpose:'Reject malformed or disallowed URLs'}], estimated_lines:80 }},
+      n5: { id:'n5', problem:'Route dispatch & middleware chain', parent_id:'n1', children:[], is_leaf:true, depth:2, plan:null, dependencies:['n4'], schema:{ summary:'Chains auth, rate-limit, and handler middleware; dispatches to correct route.', functions:[{name:'buildRouter',signature:'buildRouter(handlers: HandlerMap): Router',purpose:'Wire routes to handlers'},{name:'applyMiddleware',signature:'applyMiddleware(...mw: Middleware[]): Handler',purpose:'Compose middleware left-to-right'}], estimated_lines:110 }},
+      n6: { id:'n6', problem:'KV store adapter (Redis / in-memory)', parent_id:'n2', children:[], is_leaf:true, depth:2, plan:null, dependencies:[], schema:{ summary:'Abstract KV interface with Redis and in-memory backends.', functions:[{name:'get',signature:'get(key: string): Promise<string | null>',purpose:'Fetch value by key'},{name:'set',signature:'set(key: string, val: string, ttl?: number): Promise<void>',purpose:'Store with optional TTL'}], data_structures:[{name:'KVAdapter',fields:[{name:'get',type:'(key: string) => Promise<string|null>'},{name:'set',type:'(key: string, val: string, ttl?: number) => Promise<void>'}]}], estimated_lines:140 }},
+      n7: { id:'n7', problem:'Slug generation & collision avoidance', parent_id:'n2', children:[], is_leaf:true, depth:2, plan:null, dependencies:['n6'], schema:{ summary:'Generates short slugs, retries on collision, supports custom aliases.', functions:[{name:'generateSlug',signature:'generateSlug(url: string, opts?: SlugOpts): Promise<string>',purpose:'Create a unique short code'},{name:'checkCollision',signature:'checkCollision(slug: string, store: KVAdapter): Promise<boolean>',purpose:'Return true if slug is already taken'}], steps:['Generate 6-char base58 slug','Check KV for collision','Retry up to 5×, then expand to 8 chars','Persist mapping and return slug'], edge_cases:['Custom alias already taken','KV unavailable during check'], estimated_lines:95 }},
+      n8: { id:'n8', problem:'Click event ingestion & aggregation', parent_id:'n3', children:[], is_leaf:true, depth:2, plan:null, dependencies:['n6'], schema:{ summary:'Records click events asynchronously; aggregates counts per slug.', functions:[{name:'recordClick',signature:'recordClick(slug: string, meta: ClickMeta): void',purpose:'Fire-and-forget click recording'},{name:'getCounts',signature:'getCounts(slug: string): Promise<ClickStats>',purpose:'Return total and windowed click counts'}], estimated_lines:120 }},
+    }
+  },
+  traversalNodeId: null,
+  buildProgress: {
+    gitEnabled: true,
+    activeEpoch: 2,
+    done: true,
+    outputDir: './output/url-shortener',
+    epochs: [
+      { nodes: [
+        { nodeId:'n4', problem:'Parse & validate incoming requests', status:'done', branchName:'feat/parse-validate-incoming-requests', commitCount:3 },
+        { nodeId:'n6', problem:'KV store adapter (Redis / in-memory)', status:'done', branchName:'feat/kv-store-adapter-redis-in-memory', commitCount:4 },
+      ]},
+      { nodes: [
+        { nodeId:'n5', problem:'Route dispatch & middleware chain', status:'done', branchName:'feat/route-dispatch-middleware-chain', commitCount:3 },
+        { nodeId:'n7', problem:'Slug generation & collision avoidance', status:'done', branchName:'feat/slug-generation-collision-avoidance', commitCount:5 },
+      ]},
+      { nodes: [
+        { nodeId:'n8', problem:'Click event ingestion & aggregation', status:'done', branchName:'feat/click-event-ingestion-aggregation', commitCount:3 },
+      ]},
+    ]
+  }
+};
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const trunc = (s, n) => s.length > n ? s.slice(0, n) + '…' : s;
@@ -454,19 +504,44 @@ function renderAll() {
   }
 }
 
+// ── demo mode ─────────────────────────────────────────────────────────────
+let demoMode = false;
+function activateDemo() {
+  if (demoMode) return;
+  demoMode = true;
+  document.getElementById('demo-banner').style.display = '';
+  document.getElementById('pulse').className = 'pulse';
+  document.getElementById('hdr-screen').textContent = 'demo';
+  state = DEMO_STATE;
+  selectedId = 'n4';
+  renderAll();
+}
+
 // ── SSE connection ────────────────────────────────────────────────────────
+let demoTimer = null;
 function connect() {
   const pulse = document.getElementById('pulse');
+  // If no local server responds in 2s, show demo
+  demoTimer = setTimeout(activateDemo, 2000);
+
   const es = new EventSource('/events');
 
-  es.onopen = () => { pulse.className = 'pulse live'; };
+  es.onopen = () => {
+    clearTimeout(demoTimer);
+    pulse.className = 'pulse live';
+  };
   es.onerror = () => {
+    clearTimeout(demoTimer);
     pulse.className = 'pulse';
+    if (demoMode) return; // already in demo — stop retrying
     document.getElementById('hdr-screen').textContent = 'disconnected — retrying…';
     es.close();
     setTimeout(connect, 3000);
   };
   es.onmessage = (e) => {
+    clearTimeout(demoTimer);
+    demoMode = false;
+    document.getElementById('demo-banner').style.display = 'none';
     try {
       const next = JSON.parse(e.data);
       // auto-select active traversal node
