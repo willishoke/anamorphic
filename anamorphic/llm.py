@@ -68,21 +68,20 @@ Answer with ONLY the single word "yes" or "no"."""
         text = self._call(prompt, max_tokens=8).strip().lower()
         return text.startswith("yes")
 
-    def plan(self, problem: str) -> str:
-        """Generate a concrete implementation plan for a leaf node."""
-        prompt = f"""You are creating a concrete implementation plan for a software problem that will be implemented in ≤500 lines of Python.
+    def structured_plan(self, problem: str) -> dict:
+        """Generate a structured LeafPlan for a leaf node. Returns a dict."""
+        from .schema import LEAF_PLAN_PROMPT_TEMPLATE, extract_yaml
+        prompt = f"""You are creating a structured implementation plan for a software problem (≤500 lines of Python).
 
 Problem:
 {problem}
 
-Produce a focused implementation plan covering:
-1. Data structures / classes needed (with fields)
-2. Key functions / methods (with signatures and purpose)
-3. Implementation steps in order
-4. Edge cases and error handling to address
+Respond with ONLY valid YAML — no markdown fences, no explanation, no extra text.
+Use exactly this structure:
 
-Be specific and technical. Skip boilerplate advice. This plan drives actual code."""
-        return self._call(prompt, max_tokens=1500)
+{LEAF_PLAN_PROMPT_TEMPLATE}"""
+        text = self._call(prompt, max_tokens=2000)
+        return extract_yaml(text)
 
     def identify_dependencies(self, problems: list[str]) -> dict[int, list[int]]:
         """
@@ -106,15 +105,20 @@ Example: {{"2": [0, 1], "1": [0]}}"""
         text = self._call(prompt, max_tokens=256)
         return _parse_dep_map(text)
 
-    def implement(self, problem: str, plan: str) -> str:
+    def implement(self, problem: str, schema: dict | None = None) -> str:
         """Generate a complete Python implementation for a leaf node."""
-        plan_section = f"\nImplementation plan:\n{plan}" if plan else ""
+        if schema:
+            import yaml as _yaml
+            plan_section = "\nImplementation plan (YAML):\n" + _yaml.dump(
+                schema, default_flow_style=False, sort_keys=False
+            )
+        else:
+            plan_section = ""
         prompt = f"""You are implementing a focused Python module.
 
 Problem:
 {problem}
 {plan_section}
-
 Write complete, working Python code. Requirements:
 - A single Python module (one .py file)
 - Include all necessary imports

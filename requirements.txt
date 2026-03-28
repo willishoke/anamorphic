@@ -1,1 +1,2 @@
 anthropic>=0.40.0  # optional — only needed if using ANTHROPIC_API_KEY
+pyyaml>=6.0

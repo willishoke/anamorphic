@@ -43,9 +43,14 @@ class Explorer:
             if is_leaf:
                 node.is_leaf = True
                 with spin(f"{indent}    generating plan..."):
-                    node.plan = self.llm.plan(node.problem)
+                    try:
+                        node.schema = self.llm.structured_plan(node.problem)
+                    except Exception:
+                        # schema parse failed — leave schema=None, builder will still work
+                        node.schema = None
                 if verbose:
-                    print(f"{indent}    → leaf  plan ready ({len(node.plan.splitlines())} lines)")
+                    fn_count = len((node.schema or {}).get("functions") or [])
+                    print(f"{indent}    → leaf  schema ready ({fn_count} function(s))")
                 continue
 
             # --- decompose ---
@@ -60,7 +65,10 @@ class Explorer:
                     print(f"{indent}    ! decomposition failed ({e}), treating as leaf")
                 node.is_leaf = True
                 with spin(f"{indent}    generating plan..."):
-                    node.plan = self.llm.plan(node.problem)
+                    try:
+                        node.schema = self.llm.structured_plan(node.problem)
+                    except Exception:
+                        node.schema = None
                 continue
 
             # identify sibling dependencies and inherit parent's deps

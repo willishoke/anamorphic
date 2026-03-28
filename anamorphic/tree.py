@@ -14,6 +14,7 @@ class Node:
     depth: int = 0
     plan: Optional[str] = None
     dependencies: list[str] = field(default_factory=list)  # node IDs this depends on
+    schema: Optional[dict] = None                          # structured LeafPlan (leaf nodes only)
 
 
 class ProblemTree:
@@ -59,6 +60,7 @@ class ProblemTree:
                     "depth": v.depth,
                     "plan": v.plan,
                     "dependencies": v.dependencies,
+                    "schema": v.schema,
                 }
                 for k, v in self.nodes.items()
             },
@@ -84,6 +86,7 @@ class ProblemTree:
                 depth=raw.get("depth", 0),
                 plan=raw.get("plan"),
                 dependencies=raw.get("dependencies", []),
+                schema=raw.get("schema"),
             )
             tree.nodes[node.id] = node
             try:

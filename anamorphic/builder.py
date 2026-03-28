@@ -89,7 +89,7 @@ class Builder:
 
     def _build_node(self, node_id: str) -> str:
         node = self.tree.nodes[node_id]
-        code = self.llm.implement(node.problem, node.plan or "")
+        code = self.llm.implement(node.problem, schema=node.schema)
         filename = _slug(node.problem) + ".py"
         path = os.path.join(self.output_dir, filename)
         if os.path.exists(path):
