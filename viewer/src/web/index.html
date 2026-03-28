@@ -590,7 +590,11 @@ function renderAll() {
       ${renderNodeDetail(tree, focusId)}`;
   } else {
     stats.style.display = 'none';
-    content.innerHTML = `<div class="empty"><div class="big">○</div><div>waiting for anamorphic…</div><div style="font-size:11px;margin-top:8px">start the CLI, then refresh</div></div>`;
+    if (everConnected) {
+      content.innerHTML = `<div class="empty"><div class="big" style="color:var(--green)">●</div><div>connected</div><div style="font-size:11px;margin-top:8px">enter a problem in the terminal to begin</div></div>`;
+    } else {
+      content.innerHTML = `<div class="empty"><div class="big">○</div><div>waiting for anamorphic…</div><div style="font-size:11px;margin-top:8px">start the CLI, then refresh</div></div>`;
+    }
   }
 }
 
@@ -609,6 +613,7 @@ function activateDemo() {
 
 // ── SSE connection ────────────────────────────────────────────────────────
 let everConnected = false;
+let demoTimer;
 function connect() {
   const pulse = document.getElementById('pulse');
   const es = new EventSource('/events');
