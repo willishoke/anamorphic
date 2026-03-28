@@ -18,6 +18,7 @@ import ExploreScreen from './screens/ExploreScreen.js';
 import BuildScreen, { BuildProgress, EpochInfo, NodeBuildStatus } from './screens/BuildScreen.js'; // eslint-disable-line @typescript-eslint/no-unused-vars
 import { buildTree } from './lib/builder.js';
 import { epochs } from './lib/scheduler.js';
+import { createWebServer, pushState } from './lib/webserver.js';
 
 // --------------------------------------------------------------------------
 // Tree builder helpers (mirror of Python tree.py, minimal)
@@ -62,6 +63,26 @@ export default function App() {
 
   // build state
   const [buildProgress, setBuildProgress] = useState<BuildProgress | null>(null);
+
+  // ---- web server ---------------------------------------------------------
+
+  useEffect(() => {
+    const server = createWebServer(7777);
+    // eslint-disable-next-line no-console
+    console.error('web ui → http://localhost:7777');
+    return () => { server.close(); };
+  }, []);
+
+  // push state to web clients after every relevant change
+  // traversalState changing implies treeRef may also have been updated
+  useEffect(() => {
+    pushState({
+      screen: screen.tag,
+      tree: treeRef.current,
+      traversalNodeId: traversalState?.nodeId ?? null,
+      buildProgress,
+    });
+  });
 
   // ---- submit query -------------------------------------------------------
 
