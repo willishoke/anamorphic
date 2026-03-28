@@ -13,6 +13,7 @@ class Node:
     is_leaf: bool = False
     depth: int = 0
     plan: Optional[str] = None
+    dependencies: list[str] = field(default_factory=list)  # node IDs this depends on
 
 
 class ProblemTree:
@@ -28,13 +29,14 @@ class ProblemTree:
         self._counter += 1
         return id_
 
-    def add_child(self, parent_id: str, problem: str) -> Node:
+    def add_child(self, parent_id: str, problem: str, dependencies: list[str] | None = None) -> Node:
         parent = self.nodes[parent_id]
         node = Node(
             id=self._next_id(),
             problem=problem,
             parent_id=parent_id,
             depth=parent.depth + 1,
+            dependencies=list(dependencies) if dependencies else [],
         )
         self.nodes[node.id] = node
         parent.children.append(node.id)
@@ -56,6 +58,7 @@ class ProblemTree:
                     "is_leaf": v.is_leaf,
                     "depth": v.depth,
                     "plan": v.plan,
+                    "dependencies": v.dependencies,
                 }
                 for k, v in self.nodes.items()
             },
@@ -63,6 +66,36 @@ class ProblemTree:
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ProblemTree":
+        # Reconstruct without calling __init__ so we can populate freely
+        tree = cls.__new__(cls)
+        tree.root_id = data["root_id"]
+        tree.nodes = {}
+        max_id = -1
+        for raw in data["nodes"].values():
+            node = Node(
+                id=raw["id"],
+                problem=raw["problem"],
+                parent_id=raw.get("parent_id"),
+                children=raw.get("children", []),
+                is_leaf=raw.get("is_leaf", False),
+                depth=raw.get("depth", 0),
+                plan=raw.get("plan"),
+                dependencies=raw.get("dependencies", []),
+            )
+            tree.nodes[node.id] = node
+            try:
+                max_id = max(max_id, int(node.id))
+            except ValueError:
+                pass
+        tree._counter = max_id + 1
+        return tree
+
+    @classmethod
+    def from_json(cls, text: str) -> "ProblemTree":
+        return cls.from_dict(json.loads(text))
 
     # ------------------------------------------------------------------
     # Display

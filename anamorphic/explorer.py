@@ -63,12 +63,28 @@ class Explorer:
                     node.plan = self.llm.plan(node.problem)
                 continue
 
+            # identify sibling dependencies and inherit parent's deps
+            with spin(f"{indent}    identifying dependencies..."):
+                sibling_deps = self.llm.identify_dependencies(subproblems)
+
+            # create children; IDs are assigned in order so we can map index → id
+            children: list = []
             for sp in subproblems:
                 child = self.tree.add_child(node_id, sp)
+                children.append(child)
                 queue.append(child.id)
 
+            # apply deps: inherited from parent + sibling relationships
+            for i, child in enumerate(children):
+                inherited = list(node.dependencies)  # parent's deps flow down
+                sibling_ids = [
+                    children[j].id for j in sibling_deps.get(i, []) if j != i
+                ]
+                child.dependencies = _dedup(inherited + sibling_ids)
+
             if verbose:
-                print(f"{indent}    → {len(subproblems)} subproblems")
+                dep_count = sum(len(v) for v in sibling_deps.values())
+                print(f"{indent}    → {len(subproblems)} subproblems, {dep_count} sibling dep(s)")
 
         return self.tree
 
@@ -82,3 +98,13 @@ class Explorer:
 
 def _short(text: str, limit: int = 70) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _dedup(lst: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out = []
+    for x in lst:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out

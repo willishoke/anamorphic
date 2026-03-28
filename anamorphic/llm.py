@@ -84,6 +84,45 @@ Produce a focused implementation plan covering:
 Be specific and technical. Skip boilerplate advice. This plan drives actual code."""
         return self._call(prompt, max_tokens=1500)
 
+    def identify_dependencies(self, problems: list[str]) -> dict[int, list[int]]:
+        """
+        Given a list of sibling subproblems (by index), return which indices
+        depend on which others. Returns {dependent_index: [dependency_indices]}.
+        """
+        if len(problems) < 2:
+            return {}
+        numbered = "\n".join(f"{i}. {p}" for i, p in enumerate(problems))
+        prompt = f"""You are analyzing dependencies between software subproblems that will be implemented in parallel.
+
+Subproblems:
+{numbered}
+
+Identify which subproblems must be completed before others can begin.
+A depends on B means: A cannot start until B is finished (e.g. A uses code or data produced by B).
+
+Respond with ONLY a valid JSON object mapping each dependent index (as a string) to an array of indices it depends on.
+Only include entries where there is at least one dependency. Omit independent subproblems.
+Example: {{"2": [0, 1], "1": [0]}}"""
+        text = self._call(prompt, max_tokens=256)
+        return _parse_dep_map(text)
+
+    def implement(self, problem: str, plan: str) -> str:
+        """Generate a complete Python implementation for a leaf node."""
+        plan_section = f"\nImplementation plan:\n{plan}" if plan else ""
+        prompt = f"""You are implementing a focused Python module.
+
+Problem:
+{problem}
+{plan_section}
+
+Write complete, working Python code. Requirements:
+- A single Python module (one .py file)
+- Include all necessary imports
+- Follow the plan exactly
+- No placeholder comments like "TODO" or "pass" — implement everything
+- No markdown fences or explanation — output raw Python code only"""
+        return self._call(prompt, max_tokens=4096)
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -132,6 +171,25 @@ Be specific and technical. Skip boilerplate advice. This plan drives actual code
                     "claude CLI not found. Install Claude Code or set ANTHROPIC_API_KEY."
                 )
         raise RuntimeError(f"CLI call failed after {MAX_RETRIES} attempts") from last_err
+
+
+def _parse_dep_map(text: str) -> dict[int, list[int]]:
+    text = text.strip()
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start == -1 or end == 0:
+        return {}
+    try:
+        raw = json.loads(text[start:end])
+    except json.JSONDecodeError:
+        return {}
+    result: dict[int, list[int]] = {}
+    for k, v in raw.items():
+        try:
+            result[int(k)] = [int(i) for i in v]
+        except (ValueError, TypeError):
+            pass
+    return result
 
 
 def _parse_json_array(text: str) -> list[str]:
