@@ -305,7 +305,7 @@ function renderTreeNode(tree, nodeId, depth) {
 }
 
 function selectNode(id) {
-  selectedId = id;
+  selectedId = selectedId === id ? null : id;
   renderAll();
 }
 
@@ -485,7 +485,10 @@ function renderAll() {
   const content = document.getElementById('content');
   const stats   = document.getElementById('stats');
 
-  if (screen === 'building' && buildProgress) {
+  if (selectedId && tree) {
+    stats.style.display = 'none';
+    content.innerHTML = renderNodeDetail(tree, selectedId);
+  } else if (screen === 'building' && buildProgress) {
     const headerColor = buildProgress.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
     const headerLabel = buildProgress.gitEnabled ? 'building with git' : 'building';
     content.innerHTML = `
@@ -493,7 +496,7 @@ function renderAll() {
       ${renderBuild(buildProgress)}`;
   } else if (tree) {
     stats.style.display = 'none';
-    const focusId = traversalNodeId ?? selectedId ?? tree.root_id;
+    const focusId = traversalNodeId ?? tree.root_id;
     const label = screen === 'traversing' ? 'traversing' : screen === 'explore' ? 'explore' : '';
     content.innerHTML = `
       ${label ? `<div style="color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px">${label}</div>` : ''}
