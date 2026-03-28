@@ -518,24 +518,25 @@ function activateDemo() {
 }
 
 // ── SSE connection ────────────────────────────────────────────────────────
-let demoTimer = null;
+let everConnected = false;
 function connect() {
   const pulse = document.getElementById('pulse');
-  // If no local server responds in 2s, show demo
-  demoTimer = setTimeout(activateDemo, 2000);
-
   const es = new EventSource('/events');
 
   es.onopen = () => {
-    clearTimeout(demoTimer);
+    everConnected = true;
+    demoMode = false;
+    document.getElementById('demo-banner').style.display = 'none';
     pulse.className = 'pulse live';
   };
   es.onerror = () => {
-    clearTimeout(demoTimer);
     pulse.className = 'pulse';
-    if (demoMode) return; // already in demo — stop retrying
-    document.getElementById('hdr-screen').textContent = 'disconnected — retrying…';
     es.close();
+    if (!everConnected) {
+      activateDemo();
+      return;
+    }
+    document.getElementById('hdr-screen').textContent = 'disconnected — retrying…';
     setTimeout(connect, 3000);
   };
   es.onmessage = (e) => {
