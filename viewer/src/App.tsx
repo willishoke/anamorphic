@@ -1,7 +1,7 @@
 /**
  * Root component. Owns all app state and drives the flow:
  *
- *   input → root_review → traversing (BFS, one node at a time) → explore
+ *   input → root_review → traversing (BFS, one node at a time) → explore → building
  *
  * LLM calls are made directly via LLMClient (claude CLI or Anthropic SDK).
  */
@@ -15,6 +15,9 @@ import InputScreen from './screens/InputScreen.js';
 import ReviewScreen from './screens/ReviewScreen.js';
 import TraversalScreen from './screens/TraversalScreen.js';
 import ExploreScreen from './screens/ExploreScreen.js';
+import BuildScreen, { BuildProgress, EpochInfo, NodeBuildStatus } from './screens/BuildScreen.js'; // eslint-disable-line @typescript-eslint/no-unused-vars
+import { buildTree } from './lib/builder.js';
+import { epochs } from './lib/scheduler.js';
 
 // --------------------------------------------------------------------------
 // Tree builder helpers (mirror of Python tree.py, minimal)
@@ -38,6 +41,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
 
+  // persisted root analysis — survives screen transitions so back works
+  const rootRef = useRef<{ problem: string; analysis: RootAnalysis } | null>(null);
+
   // traversal state
   const treeRef = useRef<TreeData | null>(null);
   const queueRef = useRef<string[]>([]);
@@ -54,6 +60,9 @@ export default function App() {
     pendingSubproblems?: string[];
   } | null>(null);
 
+  // build state
+  const [buildProgress, setBuildProgress] = useState<BuildProgress | null>(null);
+
   // ---- submit query -------------------------------------------------------
 
   const handleQuery = useCallback(async (query: string) => {
@@ -65,6 +74,7 @@ export default function App() {
     treeRef.current = { root_id: rootId, nodes: { [rootId]: rootNode } };
     try {
       const analysis = await llm.current!.analyzeRoot(query);
+      rootRef.current = { problem: query, analysis };
       setLoading(false);
       setScreen({ tag: 'root_review', problem: query, analysis });
     } catch (e) {
@@ -76,8 +86,14 @@ export default function App() {
   // ---- root review: approve / refine --------------------------------------
 
   const handleRootApprove = useCallback(() => {
-    // kick off traversal from root
-    queueRef.current = [treeRef.current!.root_id];
+    // re-initialize tree in case user backed out and is re-approving
+    const rootId = '0';
+    _counter = 1;
+    if (!treeRef.current) {
+      const problem = rootRef.current?.problem ?? '';
+      treeRef.current = { root_id: rootId, nodes: { [rootId]: makeNode(rootId, problem, null, 0) } };
+    }
+    queueRef.current = [treeRef.current.root_id];
     seenRef.current = 0;
     advanceTraversal();
   }, []);
@@ -86,9 +102,109 @@ export default function App() {
     setLoading(true);
     const s = screen as Extract<AppScreen, { tag: 'root_review' }>;
     const analysis = await llm.current!.analyzeRoot(`${s.problem}\n\nUser refinement: ${feedback}`);
+    rootRef.current = { problem: s.problem, analysis };
     setLoading(false);
     setScreen({ tag: 'root_review', problem: s.problem, analysis });
   }, [screen]);
+
+  // ---- back navigation ----------------------------------------------------
+
+  const handleBackFromReview = useCallback(() => {
+    setError(undefined);
+    treeRef.current = null;
+    queueRef.current = [];
+    seenRef.current = 0;
+    setTraversalState(null);
+    setScreen({ tag: 'input' });
+  }, []);
+
+  const handleBackFromTraversal = useCallback(() => {
+    if (!rootRef.current) return;
+    const { problem, analysis } = rootRef.current;
+    // reset traversal state so re-approving starts fresh
+    treeRef.current = null;
+    queueRef.current = [];
+    seenRef.current = 0;
+    setTraversalState(null);
+    setScreen({ tag: 'root_review', problem, analysis });
+  }, []);
+
+  const handleBackFromExplore = useCallback(() => {
+    if (!rootRef.current) return;
+    const { problem, analysis } = rootRef.current;
+    setScreen({ tag: 'root_review', problem, analysis });
+  }, []);
+
+  // ---- build --------------------------------------------------------------
+
+  const handleBuild = useCallback(async (git: boolean) => {
+    const tree = treeRef.current;
+    if (!tree) return;
+
+    // pre-compute epoch schedule so we can show all epochs upfront
+    const schedule = epochs(tree.nodes);
+    const initialEpochs: EpochInfo[] = schedule.map((nodeIds) => ({
+      nodes: nodeIds.map((id) => ({
+        nodeId: id,
+        problem: tree.nodes[id]?.problem ?? id,
+        status: 'waiting' as const,
+      })),
+    }));
+
+    const outputDir = 'output';
+    setBuildProgress({ epochs: initialEpochs, activeEpoch: -1, done: false, gitEnabled: git, outputDir });
+    setScreen({ tag: 'building' });
+
+    // helper to patch a single node across all epochs
+    const patchNode = (nodeId: string, patch: Partial<NodeBuildStatus>) => {
+      setBuildProgress((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          epochs: prev.epochs.map((e) => ({
+            ...e,
+            nodes: e.nodes.map((n) => n.nodeId === nodeId ? { ...n, ...patch } : n),
+          })),
+        };
+      });
+    };
+
+    try {
+      await buildTree(tree.nodes, llm.current!, {
+        outputDir,
+        git,
+        onGitError: (err) => {
+          setBuildProgress((prev) => prev ? { ...prev, fatalError: `git init failed: ${err}`, gitEnabled: false } : prev);
+        },
+        onEpochStart: (epochIdx) => {
+          setBuildProgress((prev) => prev ? { ...prev, activeEpoch: epochIdx - 1 } : prev);
+        },
+        onNodeStart: (nodeId) => patchNode(nodeId, { status: 'running' }),
+        onNodeGitStep: (nodeId, step) => patchNode(nodeId, { gitStep: step }),
+        onNodeCommit: (nodeId, commitCount) => patchNode(nodeId, { commitCount }),
+        onNodeDone: (result) => patchNode(result.nodeId, {
+          status: result.error ? 'error' : 'done',
+          outputPath: result.outputPath,
+          error: result.error,
+          branchName: result.branchName,
+          commitCount: result.commitCount,
+          gitStep: undefined,
+        }),
+      });
+    } catch (e) {
+      setBuildProgress((prev) =>
+        prev ? { ...prev, done: true, fatalError: e instanceof Error ? e.message : String(e) } : prev,
+      );
+      return;
+    }
+
+    setBuildProgress((prev) => prev ? { ...prev, done: true } : prev);
+  }, []);
+
+  const handleBackFromBuild = useCallback(() => {
+    const tree = treeRef.current;
+    if (tree) setScreen({ tag: 'explore', tree: { ...tree } });
+  }, []);
 
   // ---- traversal: advance to next node ------------------------------------
 
@@ -245,6 +361,7 @@ export default function App() {
         loading={loading}
         onApprove={handleRootApprove}
         onRefine={handleRootRefine}
+        onBack={handleBackFromReview}
       />
     );
   }
@@ -261,12 +378,24 @@ export default function App() {
         totalSeen={traversalState.totalSeen}
         onApprove={handleNodeApprove}
         onRefine={handleNodeRefine}
+        onBack={handleBackFromTraversal}
       />
     );
   }
 
   if (screen.tag === 'explore') {
-    return <ExploreScreen tree={(screen as any).tree} onQuit={handleQuit} />;
+    return (
+      <ExploreScreen
+        tree={(screen as any).tree}
+        onQuit={handleQuit}
+        onBack={handleBackFromExplore}
+        onBuild={(git) => handleBuild(git)}
+      />
+    );
+  }
+
+  if (screen.tag === 'building' && buildProgress) {
+    return <BuildScreen progress={buildProgress} onBack={handleBackFromBuild} />;
   }
 
   return null;

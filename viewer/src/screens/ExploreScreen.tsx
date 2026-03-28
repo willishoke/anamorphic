@@ -10,14 +10,18 @@ import { writeFileSync } from 'fs';
 interface Props {
   tree: TreeData;
   onQuit: () => void;
+  onBack?: () => void;
+  onBuild?: (git: boolean) => void;
 }
 
 const BOTTOM_ACTIONS = [
+  { label: 'Build', value: 'build' },
+  { label: 'Build with git', value: 'build-git' },
   { label: 'Save tree', value: 'save' },
   { label: 'Quit', value: 'quit' },
 ];
 
-export default function ExploreScreen({ tree, onQuit }: Props) {
+export default function ExploreScreen({ tree, onQuit, onBack, onBuild }: Props) {
   const { stdout } = useStdout();
   const termW = stdout?.columns ?? 120;
   const termH = (stdout?.rows ?? 40) - 5; // header + footer + action menu
@@ -34,6 +38,7 @@ export default function ExploreScreen({ tree, onQuit }: Props) {
   const selIdx = visible.indexOf(selectedId);
 
   useInput((_char, key) => {
+    if (key.escape) { onBack?.(); return; }
     if (key.upArrow) {
       const ni = Math.max(0, selIdx - 1);
       setSelectedId(visible[ni]!);
@@ -69,6 +74,8 @@ export default function ExploreScreen({ tree, onQuit }: Props) {
   });
 
   function handleAction(value: string) {
+    if (value === 'build')     { onBuild?.(false); return; }
+    if (value === 'build-git') { onBuild?.(true);  return; }
     if (value === 'quit') { onQuit(); return; }
     if (value === 'save') {
       try {

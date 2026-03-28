@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { Line } from '../lib/schemaToLines.js';
 import ActionMenu from '../components/ActionMenu.js';
+import BlinkingCursor from '../components/BlinkingCursor.js';
 
 interface Props {
   nodeId: string;
@@ -13,6 +14,7 @@ interface Props {
   totalSeen: number;
   onApprove: () => void;
   onRefine: (feedback: string) => void;
+  onBack?: () => void;
 }
 
 type Mode = 'menu' | 'refine';
@@ -24,7 +26,7 @@ const ACTIONS = [
 
 export default function TraversalScreen({
   nodeId, problem, isLeaf, lines, loading,
-  queueLength, totalSeen, onApprove, onRefine,
+  queueLength, totalSeen, onApprove, onRefine, onBack,
 }: Props) {
   const [mode, setMode] = useState<Mode>('menu');
   const [feedback, setFeedback] = useState('');
@@ -38,6 +40,7 @@ export default function TraversalScreen({
 
   useInput((_char, key) => {
     if (loading || mode !== 'menu') return;
+    if (key.escape) { onBack?.(); return; }
     if (key.downArrow) setScroll((s) => canScrollDown ? s + 1 : s);
     if (key.upArrow)   setScroll((s) => Math.max(0, s - 1));
   });
@@ -102,7 +105,7 @@ export default function TraversalScreen({
           <Text>What would you like to change?</Text>
           <Text dimColor>Press ↵ to submit or Escape to go back.</Text>
           <Box borderStyle="round" borderColor="yellow" paddingX={1} width={72} marginTop={1}>
-            <Text>{feedback}<Text color="yellow">█</Text></Text>
+            <Text>{feedback}<BlinkingCursor color="yellow" /></Text>
           </Box>
         </Box>
       )}

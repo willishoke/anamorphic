@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
+import BlinkingCursor from '../components/BlinkingCursor.js';
 
 interface Props {
   onSubmit: (query: string) => void;
@@ -40,7 +41,7 @@ export default function InputScreen({ onSubmit, onQuit, loading, error }: Props)
             <Box marginTop={1} borderStyle="round" borderColor={error ? 'red' : 'cyan'} paddingX={1} width={72}>
               <Text>
                 {value}
-                <Text color="cyan">█</Text>
+                <BlinkingCursor color="cyan" />
               </Text>
             </Box>
             {error ? (

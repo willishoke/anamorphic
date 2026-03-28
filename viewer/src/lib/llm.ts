@@ -6,7 +6,7 @@
  * All structured outputs request JSON instead of YAML, keeping the
  * runtime dependency-free (no js-yaml needed).
  */
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import type { RootAnalysis, LeafSchema } from './types.js';
 
@@ -91,15 +91,20 @@ Use exactly this structure:
   }
 
   async assess(problem: string): Promise<boolean> {
-    const text = await this.call(`Can a skilled developer fully implement the following problem in 500 or fewer lines of Python?
+    const text = await this.call(`Does the following problem describe a single, cohesive software component that can be fully implemented in one focused Python module of 120 lines or fewer?
 
 Problem:
 ${problem}
 
-Rules:
-- 500 lines is roughly one focused module; count only implementation lines
-- Standard library and common packages are available
-- The problem must be specific enough to implement directly
+A problem qualifies as a leaf (answer "yes") only if ALL of the following are true:
+- It has exactly one clear responsibility — a single data structure, algorithm, parser, renderer, or interface
+- It requires no internal design decomposition; the implementation approach is obvious
+- A complete, production-quality implementation fits in ~120 lines (excluding blank lines and docstrings)
+
+Answer "no" if the problem:
+- Combines multiple distinct concerns (e.g. parsing AND rendering AND storage)
+- Would naturally split into several classes or subsystems
+- Requires more than ~120 lines to do properly
 
 Answer with ONLY the single word "yes" or "no".`);
     return text.trim().toLowerCase().startsWith('yes');
@@ -181,7 +186,21 @@ Respond with ONLY a valid JSON array of strings — no other text.`);
   }
 
   async implement(problem: string, schema: LeafSchema): Promise<string> {
-    return this.call(`Implement the following as a complete Python module.
+    return this.call(this.implementPrompt(problem, schema));
+  }
+
+  /** Streaming variant — yields text chunks as they arrive. */
+  async *implementStream(problem: string, schema: LeafSchema): AsyncGenerator<string> {
+    const prompt = this.implementPrompt(problem, schema);
+    if (this.mode === 'sdk' && this.sdk) {
+      yield* this.streamSDK(prompt);
+    } else {
+      yield* this.streamCLI(prompt);
+    }
+  }
+
+  private implementPrompt(problem: string, schema: LeafSchema): string {
+    return `Implement the following as a complete Python module.
 
 Problem:
 ${problem}
@@ -193,7 +212,41 @@ Requirements:
 - A single Python module (.py file)
 - Include all necessary imports
 - No placeholder TODOs — implement everything
-- No markdown fences or explanation — output raw Python code only`);
+- No markdown fences or explanation — output raw Python code only`;
+  }
+
+  private async *streamSDK(prompt: string): AsyncGenerator<string> {
+    const stream = this.sdk.messages.stream({
+      model: MODEL,
+      max_tokens: 8192,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    for await (const text of stream.textStream as AsyncIterable<string>) {
+      yield text;
+    }
+  }
+
+  private async *streamCLI(prompt: string): AsyncGenerator<string> {
+    const proc = spawn('claude', ['-p', '--dangerously-skip-permissions', prompt], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderrText = '';
+    proc.stderr?.on('data', (d: Buffer) => { stderrText += d.toString(); });
+
+    for await (const chunk of proc.stdout as AsyncIterable<Buffer>) {
+      yield chunk.toString('utf8');
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      proc.on('close', (code) => {
+        if (code === 0 || code === null) resolve();
+        else reject(new Error(`claude exited ${code}${stderrText ? ': ' + stderrText.slice(0, 200) : ''}`));
+      });
+      proc.on('error', (err) => {
+        const e = err as NodeJS.ErrnoException;
+        reject(e.code === 'ENOENT'
+          ? new Error('claude CLI not found. Install Claude Code or set ANTHROPIC_API_KEY.')
+          : err);
+      });
+    });
   }
 
   // ---- internals ------------------------------------------------------------
@@ -225,7 +278,7 @@ Requirements:
 
   private async callCLI(prompt: string): Promise<string> {
     try {
-      const { stdout } = await execFileP('claude', ['-p', prompt], {
+      const { stdout } = await execFileP('claude', ['-p', '--dangerously-skip-permissions', prompt], {
         maxBuffer: MAX_BUF,
         timeout: 180_000,
       });

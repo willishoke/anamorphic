@@ -55,4 +55,5 @@ export type AppScreen =
   | { tag: 'input' }
   | { tag: 'root_review'; problem: string; analysis: RootAnalysis }
   | { tag: 'traversing'; tree: TreeData; currentId: string; nodeMarkdown: string }
-  | { tag: 'explore'; tree: TreeData };
+  | { tag: 'explore'; tree: TreeData }
+  | { tag: 'building' };
