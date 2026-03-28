@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { Line } from '../lib/schemaToLines.js';
+import ActionMenu from '../components/ActionMenu.js';
 
 interface Props {
   title: string;
@@ -10,42 +11,48 @@ interface Props {
   onRefine: (feedback: string) => void;
 }
 
-type Mode = 'view' | 'input';
+type Mode = 'menu' | 'refine';
+
+const ACTIONS = [
+  { label: 'Approve', value: 'approve' },
+  { label: 'Refine…', value: 'refine' },
+];
 
 export default function ReviewScreen({ title, lines, loading, onApprove, onRefine }: Props) {
-  const [mode, setMode] = useState<Mode>('view');
+  const [mode, setMode] = useState<Mode>('menu');
   const [feedback, setFeedback] = useState('');
   const [scroll, setScroll] = useState(0);
 
-  const visible = lines.slice(scroll, scroll + 24);
-  const canScrollDown = scroll + 24 < lines.length;
+  const PAGE = 24;
+  const visible = lines.slice(scroll, scroll + PAGE);
+  const canScrollDown = scroll + PAGE < lines.length;
 
-  // reset scroll when content changes
-  React.useEffect(() => { setScroll(0); setMode('view'); }, [lines]);
+  React.useEffect(() => { setScroll(0); setMode('menu'); }, [lines]);
 
-  useInput((char, key) => {
-    if (loading) return;
-
-    if (mode === 'view') {
-      if (key.return || char === 'a') { onApprove(); return; }
-      if (char === 'r') { setMode('input'); return; }
-      if (key.downArrow || char === 'j') setScroll((s) => canScrollDown ? s + 1 : s);
-      if (key.upArrow   || char === 'k') setScroll((s) => Math.max(0, s - 1));
-      if (char === 'd') setScroll((s) => canScrollDown ? Math.min(s + 8, lines.length - 1) : s);
-      if (char === 'u') setScroll((s) => Math.max(0, s - 8));
-    }
-
-    if (mode === 'input') {
-      if (key.return) {
-        const trimmed = feedback.trim();
-        if (trimmed) { onRefine(trimmed); setFeedback(''); setMode('view'); }
-        return;
-      }
-      if (key.escape) { setMode('view'); setFeedback(''); return; }
-      if (key.backspace || key.delete) { setFeedback((f) => f.slice(0, -1)); return; }
-      if (!key.ctrl && !key.meta && char) setFeedback((f) => f + char);
-    }
+  // scroll keys active only in menu mode (no action menu conflict)
+  useInput((_char, key) => {
+    if (loading || mode !== 'menu') return;
+    if (key.downArrow) setScroll((s) => canScrollDown ? s + 1 : s);
+    if (key.upArrow)   setScroll((s) => Math.max(0, s - 1));
   });
+
+  // refinement text input
+  useInput((char, key) => {
+    if (mode !== 'refine') return;
+    if (key.return) {
+      const trimmed = feedback.trim();
+      if (trimmed) { onRefine(trimmed); setFeedback(''); setMode('menu'); }
+      return;
+    }
+    if (key.escape) { setMode('menu'); setFeedback(''); return; }
+    if (key.backspace || key.delete) { setFeedback((f) => f.slice(0, -1)); return; }
+    if (!key.ctrl && !key.meta && char) setFeedback((f) => f + char);
+  });
+
+  function handleAction(value: string) {
+    if (value === 'approve') onApprove();
+    if (value === 'refine')  setMode('refine');
+  }
 
   return (
     <Box flexDirection="column" paddingLeft={2} paddingTop={1}>
@@ -72,25 +79,21 @@ export default function ReviewScreen({ title, lines, loading, onApprove, onRefin
         )}
       </Box>
 
-      {!loading && lines.length > 24 && (
-        <Text dimColor>  {scroll + 1}/{lines.length}  [j/k] scroll  [u/d] page</Text>
+      {!loading && lines.length > PAGE && (
+        <Text dimColor>  ↑ ↓ to scroll  ({scroll + 1}–{Math.min(scroll + PAGE, lines.length)} of {lines.length})</Text>
       )}
 
-      <Box marginTop={1}>
-        {mode === 'view' ? (
-          <Text>
-            <Text color="green" bold>[a/↵]</Text><Text> approve  </Text>
-            <Text color="yellow" bold>[r]</Text><Text> refine</Text>
-          </Text>
-        ) : (
-          <Box flexDirection="column">
-            <Text>Feedback: <Text dimColor>[esc] cancel  [↵] submit</Text></Text>
-            <Box borderStyle="round" borderColor="yellow" paddingX={1} width={72} marginTop={0}>
-              <Text>{feedback}<Text color="yellow">█</Text></Text>
-            </Box>
+      {mode === 'menu' ? (
+        <ActionMenu actions={ACTIONS} onSelect={handleAction} disabled={loading} />
+      ) : (
+        <Box flexDirection="column" marginTop={1}>
+          <Text>What would you like to change?</Text>
+          <Text dimColor>Press ↵ to submit or Escape to go back.</Text>
+          <Box borderStyle="round" borderColor="yellow" paddingX={1} width={72} marginTop={1}>
+            <Text>{feedback}<Text color="yellow">█</Text></Text>
           </Box>
-        )}
-      </Box>
+        </Box>
+      )}
     </Box>
   );
 }

@@ -14,30 +14,23 @@ export default function InputScreen({ onSubmit }: Props) {
       if (trimmed) onSubmit(trimmed);
       return;
     }
-    if (key.backspace || key.delete) {
-      setValue((v) => v.slice(0, -1));
-      return;
-    }
-    if (!key.ctrl && !key.meta && char) {
-      setValue((v) => v + char);
-    }
+    if (key.backspace || key.delete) { setValue((v) => v.slice(0, -1)); return; }
+    if (!key.ctrl && !key.meta && char) setValue((v) => v + char);
   });
 
   return (
     <Box flexDirection="column" paddingTop={2} paddingLeft={3}>
-      <Text bold color="cyan">
-        anamorphic
-      </Text>
+      <Text bold color="cyan">anamorphic</Text>
       <Text dimColor>autonomous problem space explorer</Text>
       <Box marginTop={2} flexDirection="column">
-        <Text>Describe your problem:</Text>
+        <Text>Describe the problem you want to explore:</Text>
         <Box marginTop={1} borderStyle="round" borderColor="cyan" paddingX={1} width={72}>
           <Text>
             {value}
             <Text color="cyan">█</Text>
           </Text>
         </Box>
-        <Text dimColor>  [enter] submit</Text>
+        <Text dimColor>Press ↵ when ready.</Text>
       </Box>
     </Box>
   );
