@@ -83,6 +83,66 @@ Use exactly this structure:
         text = self._call(prompt, max_tokens=2000)
         return extract_yaml(text)
 
+    def analyze_root(self, problem: str) -> str:
+        """Produce a structured markdown analysis of the root problem."""
+        prompt = f"""You are analyzing a software problem before breaking it down.
+
+Problem:
+{problem}
+
+Write a concise structured markdown analysis with these sections:
+## Problem Statement
+(restate clearly in 1-2 sentences)
+
+## Key Components
+(bullet list of the major pieces involved)
+
+## Scope Assessment
+(1-2 sentences on size/complexity and why decomposition is needed)
+
+Be specific and technical. This is shown to the user for approval before decomposition begins."""
+        return self._call(prompt, max_tokens=800)
+
+    def refine_plan(self, problem: str, schema: dict, feedback: str) -> dict:
+        """Revise a structured plan based on user feedback."""
+        import yaml as _yaml
+        from .schema import LEAF_PLAN_PROMPT_TEMPLATE, extract_yaml
+        current = _yaml.dump(schema, default_flow_style=False, sort_keys=False)
+        prompt = f"""You are revising an implementation plan based on user feedback.
+
+Problem:
+{problem}
+
+Current plan (YAML):
+{current}
+
+User feedback:
+{feedback}
+
+Produce a revised plan addressing the feedback. Respond with ONLY valid YAML, same structure:
+
+{LEAF_PLAN_PROMPT_TEMPLATE}"""
+        return extract_yaml(self._call(prompt, max_tokens=2000))
+
+    def refine_decompose(self, problem: str, subproblems: list[str], feedback: str) -> list[str]:
+        """Revise a decomposition based on user feedback."""
+        current = "\n".join(f"{i+1}. {s}" for i, s in enumerate(subproblems))
+        prompt = f"""You are revising a problem decomposition based on user feedback.
+
+Problem:
+{problem}
+
+Current decomposition:
+{current}
+
+User feedback:
+{feedback}
+
+Produce a revised list of 2-5 subproblems addressing the feedback.
+Respond with ONLY a valid JSON array of strings — no other text.
+Example: ["subproblem one", "subproblem two"]"""
+        return _parse_json_array(self._call(prompt, max_tokens=1024))
+
     def identify_dependencies(self, problems: list[str]) -> dict[int, list[int]]:
         """
         Given a list of sibling subproblems (by index), return which indices
