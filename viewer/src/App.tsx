@@ -3,13 +3,12 @@
  *
  *   input → root_review → traversing (BFS, one node at a time) → explore
  *
- * LLM calls are made via the Python bridge. The bridge runs as a child
- * process; all calls are async and update React state on completion.
+ * LLM calls are made directly via LLMClient (claude CLI or Anthropic SDK).
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useApp } from 'ink';
-import { Bridge } from './lib/bridge.js';
-import { AppScreen, TreeData, NodeData } from './lib/types.js';
+import { LLMClient } from './lib/llm.js';
+import { AppScreen, TreeData, NodeData, LeafSchema } from './lib/types.js';
 import { rootAnalysisToLines, schemaToLines, decompositionToLines, Line } from './lib/schemaToLines.js';
 import type { RootAnalysis } from './lib/types.js';
 import InputScreen from './screens/InputScreen.js';
@@ -32,10 +31,8 @@ function makeNode(id: string, problem: string, parentId: string | null, depth: n
 
 export default function App() {
   const { exit } = useApp();
-  const bridge = useRef<Bridge | null>(null);
-
-  // initialise bridge once
-  if (!bridge.current) bridge.current = new Bridge();
+  const llm = useRef<LLMClient | null>(null);
+  if (!llm.current) llm.current = new LLMClient();
 
   const [screen, setScreen] = useState<AppScreen>({ tag: 'input' });
   const [loading, setLoading] = useState(false);
@@ -53,7 +50,7 @@ export default function App() {
     queueLength: number;
     totalSeen: number;
     // stash pending data for approval
-    pendingSchema?: Record<string, unknown>;
+    pendingSchema?: LeafSchema;
     pendingSubproblems?: string[];
   } | null>(null);
 
@@ -67,7 +64,7 @@ export default function App() {
     const rootNode = makeNode(rootId, query, null, 0);
     treeRef.current = { root_id: rootId, nodes: { [rootId]: rootNode } };
     try {
-      const analysis = await bridge.current!.analyzeRoot(query);
+      const analysis = await llm.current!.analyzeRoot(query);
       setLoading(false);
       setScreen({ tag: 'root_review', problem: query, analysis });
     } catch (e) {
@@ -88,7 +85,7 @@ export default function App() {
   const handleRootRefine = useCallback(async (feedback: string) => {
     setLoading(true);
     const s = screen as Extract<AppScreen, { tag: 'root_review' }>;
-    const analysis = await bridge.current!.analyzeRoot(`${s.problem}\n\nUser refinement: ${feedback}`);
+    const analysis = await llm.current!.analyzeRoot(`${s.problem}\n\nUser refinement: ${feedback}`);
     setLoading(false);
     setScreen({ tag: 'root_review', problem: s.problem, analysis });
   }, [screen]);
@@ -110,12 +107,12 @@ export default function App() {
     seenRef.current += 1;
     setLoading(true);
 
-    const isLeaf = await bridge.current!.assess(node.problem);
+    const isLeaf = await llm.current!.assess(node.problem);
 
     if (isLeaf) {
-      const schema = await bridge.current!.structuredPlan(node.problem);
+      const schema = await llm.current!.structuredPlan(node.problem);
       setLoading(false);
-      const lines = schemaToLines(node.problem, schema as any);
+      const lines = schemaToLines(node.problem, schema);
       setTraversalState({
         nodeId,
         problem: node.problem,
@@ -127,7 +124,7 @@ export default function App() {
       });
     } else {
       const parentProblem = node.parent_id ? tree.nodes[node.parent_id]?.problem ?? '' : '';
-      const subproblems = await bridge.current!.decompose(node.problem, parentProblem);
+      const subproblems = await llm.current!.decompose(node.problem, parentProblem);
       setLoading(false);
       const lines = decompositionToLines(node.problem, subproblems);
       setTraversalState({
@@ -162,7 +159,7 @@ export default function App() {
       // identify sibling deps
       let deps: Record<string, number[]> = {};
       if (subs.length > 1) {
-        try { deps = await bridge.current!.identifyDeps(subs); } catch { /* skip on error */ }
+        try { deps = await llm.current!.identifyDeps(subs); } catch { /* skip on error */ }
       }
 
       const childIds: string[] = [];
@@ -204,15 +201,15 @@ export default function App() {
     setLoading(true);
 
     if (isLeaf) {
-      const schema = await bridge.current!.refinePlan(problem, pendingSchema!, feedback);
+      const schema = await llm.current!.refinePlan(problem, pendingSchema!, feedback);
       setLoading(false);
       setTraversalState((prev) => ({
         ...prev!,
         pendingSchema: schema,
-        lines: schemaToLines(problem, schema as any),
+        lines: schemaToLines(problem, schema),
       }));
     } else {
-      const subs = await bridge.current!.refineDecompose(problem, pendingSubproblems!, feedback);
+      const subs = await llm.current!.refineDecompose(problem, pendingSubproblems!, feedback);
       setLoading(false);
       setTraversalState((prev) => ({
         ...prev!,
@@ -225,7 +222,6 @@ export default function App() {
   // ---- render -------------------------------------------------------------
 
   const handleQuit = useCallback(() => {
-    bridge.current?.destroy();
     exit();
   }, [exit]);
 
