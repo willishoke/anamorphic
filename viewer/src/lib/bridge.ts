@@ -13,11 +13,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 type Resolver = (value: Record<string, unknown>) => void;
+type Rejecter = (err: Error) => void;
 
 export class Bridge {
   private proc: ChildProcess;
-  private pending = new Map<string, Resolver>();
+  private pending = new Map<string, { resolve: Resolver; reject: Rejecter }>();
   private counter = 0;
+  private dead = false;
 
   constructor() {
     this.proc = spawn('python3', ['-m', 'anamorphic.server'], {
@@ -29,25 +31,35 @@ export class Bridge {
     rl.on('line', (line) => {
       try {
         const resp = JSON.parse(line) as Record<string, unknown>;
-        const resolve = this.pending.get(resp['id'] as string);
-        if (resolve) {
+        const entry = this.pending.get(resp['id'] as string);
+        if (entry) {
           this.pending.delete(resp['id'] as string);
-          resolve(resp);
+          entry.resolve(resp);
         }
       } catch {
         // malformed line — ignore
       }
     });
 
-    this.proc.on('error', (err) => {
-      process.stderr.write(`[bridge] python error: ${err.message}\n`);
+    const fail = (reason: string) => {
+      if (this.dead) return;
+      this.dead = true;
+      const err = new Error(reason);
+      for (const entry of this.pending.values()) entry.reject(err);
+      this.pending.clear();
+    };
+
+    this.proc.on('error', (err) => fail(`Python process error: ${err.message}`));
+    this.proc.on('close', (code) => {
+      if (code !== 0 && code !== null) fail(`Python process exited with code ${code}`);
     });
   }
 
   private call(action: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (this.dead) return Promise.reject(new Error('Python bridge is not running'));
     const id = String(++this.counter);
-    return new Promise((resolve) => {
-      this.pending.set(id, resolve);
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject });
       const msg = JSON.stringify({ id, action, ...params });
       this.proc.stdin!.write(msg + '\n');
     });

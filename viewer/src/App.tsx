@@ -39,6 +39,7 @@ export default function App() {
 
   const [screen, setScreen] = useState<AppScreen>({ tag: 'input' });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | undefined>();
 
   // traversal state
   const treeRef = useRef<TreeData | null>(null);
@@ -59,15 +60,20 @@ export default function App() {
   // ---- submit query -------------------------------------------------------
 
   const handleQuery = useCallback(async (query: string) => {
+    setError(undefined);
     setLoading(true);
     const rootId = '0';
     _counter = 1;
     const rootNode = makeNode(rootId, query, null, 0);
     treeRef.current = { root_id: rootId, nodes: { [rootId]: rootNode } };
-
-    const analysis = await bridge.current!.analyzeRoot(query);
-    setLoading(false);
-    setScreen({ tag: 'root_review', problem: query, analysis });
+    try {
+      const analysis = await bridge.current!.analyzeRoot(query);
+      setLoading(false);
+      setScreen({ tag: 'root_review', problem: query, analysis });
+    } catch (e) {
+      setLoading(false);
+      setError(e instanceof Error ? e.message : String(e));
+    }
   }, []);
 
   // ---- root review: approve / refine --------------------------------------
@@ -218,8 +224,20 @@ export default function App() {
 
   // ---- render -------------------------------------------------------------
 
+  const handleQuit = useCallback(() => {
+    bridge.current?.destroy();
+    exit();
+  }, [exit]);
+
   if (screen.tag === 'input') {
-    return <InputScreen onSubmit={handleQuery} />;
+    return (
+      <InputScreen
+        onSubmit={handleQuery}
+        onQuit={handleQuit}
+        loading={loading}
+        error={error}
+      />
+    );
   }
 
   if (screen.tag === 'root_review') {
@@ -252,15 +270,7 @@ export default function App() {
   }
 
   if (screen.tag === 'explore') {
-    return (
-      <ExploreScreen
-        tree={(screen as any).tree}
-        onQuit={() => {
-          bridge.current?.destroy();
-          exit();
-        }}
-      />
-    );
+    return <ExploreScreen tree={(screen as any).tree} onQuit={handleQuit} />;
   }
 
   return null;
