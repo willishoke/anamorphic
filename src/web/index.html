@@ -519,6 +519,8 @@ function selectNode(id) {
 
   if (screen === 'explore') {
     content.innerHTML = renderExploreContent();
+  } else if (screen === 'traversing') {
+    content.innerHTML = renderTraversalScreen();
   } else if (screen === 'building' && buildProgress) {
     const headerColor = buildProgress.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
     const headerLabel = buildProgress.gitEnabled ? 'building with git' : 'building';
@@ -786,6 +788,16 @@ function renderTraversalScreen() {
                 : pendingAction === 'node_refine'  ? 'refining…'
                 : 'thinking…';
     return `<div class="loading-card"><div class="loading-spinner"></div>${label}</div>`;
+  }
+
+  // User clicked a different node in the sidebar — show its detail as a peek view
+  const { tree } = state;
+  if (selectedId && selectedId !== traversal?.nodeId && tree?.nodes?.[selectedId]) {
+    return `
+      ${renderNodeDetail(tree, selectedId)}
+      <div class="action-panel">
+        <button class="btn btn-ghost" onclick="selectNode('${traversal?.nodeId}')">← back to current node</button>
+      </div>`;
   }
 
   const nodeId   = traversal?.nodeId ?? '';
