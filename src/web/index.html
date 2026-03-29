@@ -385,6 +385,7 @@ let selectedId = null;
 let sidebarTab = 'tree';
 let demoMode = false;
 let everConnected = false;
+let pendingAction = null;
 
 function setTab(tab) {
   sidebarTab = tab;
@@ -397,6 +398,8 @@ function setTab(tab) {
 // ── action dispatch ──────────────────────────────────────────────────────────
 async function sendAction(action) {
   if (demoMode) return;
+  pendingAction = action.type;
+  renderContent();
   try {
     await fetch('/action', {
       method: 'POST',
@@ -404,6 +407,8 @@ async function sendAction(action) {
       body: JSON.stringify(action),
     });
   } catch (e) {
+    pendingAction = null;
+    renderContent();
     console.error('action failed', e);
   }
 }
@@ -707,12 +712,14 @@ function renderRootReview() {
     ${!loading ? `
     <div class="action-panel">
       <div class="action-buttons">
-        <button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back</button>
-        <button class="btn btn-success" onclick="sendAction({type:'root_approve'})">approve & decompose →</button>
+        <button class="btn btn-ghost" onclick="sendAction({type:'back'})" ${pendingAction ? 'disabled' : ''}>← back</button>
+        <button class="btn btn-success" onclick="sendAction({type:'root_approve'})" ${pendingAction ? 'disabled' : ''}>
+          ${pendingAction === 'root_approve' ? 'processing…' : 'approve & decompose →'}
+        </button>
       </div>
       <div class="refine-row">
-        <input type="text" id="refine-input" class="input-text" placeholder="What should change? e.g. focus only on the API layer">
-        <button class="btn btn-secondary" onclick="sendRefine('root_refine')">refine</button>
+        <input type="text" id="refine-input" class="input-text" placeholder="What should change? e.g. focus only on the API layer" ${pendingAction ? 'disabled' : ''}>
+        <button class="btn btn-secondary" onclick="sendRefine('root_refine')" ${pendingAction ? 'disabled' : ''}>refine</button>
       </div>
     </div>` : ''}`;
 }
@@ -788,12 +795,14 @@ function renderTraversalScreen() {
     ${!loading ? `
     <div class="action-panel">
       <div class="action-buttons">
-        <button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back</button>
-        <button class="btn btn-success" onclick="sendAction({type:'node_approve'})">approve →</button>
+        <button class="btn btn-ghost" onclick="sendAction({type:'back'})" ${pendingAction ? 'disabled' : ''}>← back</button>
+        <button class="btn btn-success" onclick="sendAction({type:'node_approve'})" ${pendingAction ? 'disabled' : ''}>
+          ${pendingAction === 'node_approve' ? 'processing…' : 'approve →'}
+        </button>
       </div>
       <div class="refine-row">
-        <input type="text" id="refine-input" class="input-text" placeholder="What should change?">
-        <button class="btn btn-secondary" onclick="sendRefine('node_refine')">refine</button>
+        <input type="text" id="refine-input" class="input-text" placeholder="What should change?" ${pendingAction ? 'disabled' : ''}>
+        <button class="btn btn-secondary" onclick="sendRefine('node_refine')" ${pendingAction ? 'disabled' : ''}>refine</button>
       </div>
     </div>` : ''}`;
 }
@@ -937,6 +946,7 @@ function connect() {
   es.onmessage = (e) => {
     clearTimeout(demoTimer);
     demoMode = false;
+    pendingAction = null;
     document.getElementById('demo-banner').style.display = 'none';
     try {
       const next = JSON.parse(e.data);
