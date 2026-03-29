@@ -8,10 +8,11 @@ let server: Server | null = null;
 
 app.whenReady().then(async () => {
   const orch = new Orchestrator();
-  server = createWebServer(7777, orch);
+  server = createWebServer(0, orch);
 
   // Wait for the HTTP server to be listening before opening the window
   await new Promise<void>((resolve) => server!.once('listening', resolve));
+  const { port } = server!.address() as { port: number };
 
   win = new BrowserWindow({
     width: 1280,
@@ -24,7 +25,7 @@ app.whenReady().then(async () => {
     },
   });
 
-  win.loadURL('http://localhost:7777');
+  win.loadURL(`http://localhost:${port}`);
   win.on('closed', () => { win = null; });
 });
 
