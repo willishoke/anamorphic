@@ -386,6 +386,8 @@ let sidebarTab = 'tree';
 let demoMode = false;
 let everConnected = false;
 let pendingAction = null;
+let lastTreeKey = null;
+let lastBuildKey = null;
 
 function setTab(tab) {
   sidebarTab = tab;
@@ -888,8 +890,37 @@ function renderContent() {
   sidebar.style.display = showSidebar ? '' : 'none';
 
   if (showSidebar && tree) {
-    document.getElementById('sidebar-tree').innerHTML   = renderTreeNode(tree, tree.root_id, 0);
-    document.getElementById('sidebar-epochs').innerHTML = renderEpochSidebar(tree, buildProgress);
+    // Only rebuild tree HTML when node count/structure changes
+    const treeKey = Object.keys(tree.nodes).sort().join(',');
+    if (treeKey !== lastTreeKey) {
+      lastTreeKey = treeKey;
+      document.getElementById('sidebar-tree').innerHTML = renderTreeNode(tree, tree.root_id, 0);
+    } else {
+      // Structure unchanged — just patch row classes in place
+      document.querySelectorAll('.tree-row[data-node-id]').forEach(el => {
+        const nid = el.dataset.nodeId;
+        const isCurrent = nid === state.traversalNodeId;
+        el.className = 'tree-row' + (isCurrent ? ' active' : nid === selectedId ? ' selected' : '');
+        const icon = el.querySelector('.node-icon');
+        if (icon) {
+          const status = nodeStatus(nid);
+          const node = tree.nodes[nid];
+          let cls = node?.is_leaf ? 'leaf' : 'internal';
+          if (status) cls = status;
+          else if (isCurrent) cls = 'running';
+          icon.className = `node-icon ${cls}`;
+        }
+      });
+    }
+
+    // Only rebuild epoch sidebar when epoch structure or node statuses change
+    const buildKey = buildProgress
+      ? buildProgress.epochs.map(e => e.nodes.map(n => n.nodeId + n.status).join('|')).join(';')
+      : '';
+    if (buildKey !== lastBuildKey) {
+      lastBuildKey = buildKey;
+      document.getElementById('sidebar-epochs').innerHTML = renderEpochSidebar(tree, buildProgress);
+    }
   }
 
   if (!screen || screen === 'input') {
@@ -976,6 +1007,7 @@ function connect() {
     clearTimeout(demoTimer);
     demoMode = false;
     pendingAction = null;
+    if (!everConnected) { lastTreeKey = null; lastBuildKey = null; }
     document.getElementById('demo-banner').style.display = 'none';
     try {
       const next = JSON.parse(e.data);
