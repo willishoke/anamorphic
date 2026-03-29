@@ -192,6 +192,37 @@ main { flex: 1; display: flex; overflow: hidden; }
   padding: 6px 0;
 }
 .loading-text { color: var(--dim); font-size: 12px; }
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--bg3) 25%, var(--border) 50%, var(--bg3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+  border-radius: 3px;
+  height: 11px;
+  margin-bottom: 7px;
+}
+.skeleton-group { margin-top: 14px; }
+.loading-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 28px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.loading-spinner {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--cyan);
+  animation: spin-pulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
 
 /* ── Input screen ── */
 .input-screen {
@@ -385,6 +416,9 @@ let selectedId = null;
 let sidebarTab = 'tree';
 let demoMode = false;
 let everConnected = false;
+let pendingAction = null;
+let lastTreeKey = null;
+let lastBuildKey = null;
 
 function setTab(tab) {
   sidebarTab = tab;
@@ -397,6 +431,8 @@ function setTab(tab) {
 // ── action dispatch ──────────────────────────────────────────────────────────
 async function sendAction(action) {
   if (demoMode) return;
+  pendingAction = action.type;
+  renderContent();
   try {
     await fetch('/action', {
       method: 'POST',
@@ -404,6 +440,8 @@ async function sendAction(action) {
       body: JSON.stringify(action),
     });
   } catch (e) {
+    pendingAction = null;
+    renderContent();
     console.error('action failed', e);
   }
 }
@@ -467,7 +505,7 @@ function renderTreeNode(tree, nodeId, depth) {
   const children = node.children.map(id => renderTreeNode(tree, id, depth + 1)).join('');
   return `
     <div class="tree-node">
-      <div class="tree-row ${rowClass}" onclick="selectNode('${nodeId}')">
+      <div class="tree-row ${rowClass}" data-node-id="${nodeId}" onclick="selectNode('${nodeId}')">
         <div class="node-icon ${iconClass}"></div>
         <span class="node-label" title="${esc(node.problem)}">${esc(label)}</span>
         <span class="node-meta">${meta}</span>
@@ -478,7 +516,38 @@ function renderTreeNode(tree, nodeId, depth) {
 
 function selectNode(id) {
   selectedId = selectedId === id ? null : id;
-  renderContent();
+
+  // Update tree row highlight without rebuilding the DOM
+  document.querySelectorAll('.tree-row[data-node-id]').forEach(el => {
+    const nid = el.dataset.nodeId;
+    const isCurrent = nid === state.traversalNodeId;
+    el.className = 'tree-row' + (isCurrent ? ' active' : nid === selectedId ? ' selected' : '');
+  });
+
+  // Re-render content area only (not the sidebar tree)
+  const { screen, tree, buildProgress } = state;
+  const content = document.getElementById('content');
+  const queryVal  = document.getElementById('query-input')?.value  ?? '';
+  const refineVal = document.getElementById('refine-input')?.value ?? '';
+
+  if (screen === 'explore') {
+    content.innerHTML = renderExploreContent();
+  } else if (screen === 'traversing') {
+    content.innerHTML = renderTraversalScreen();
+  } else if (screen === 'building' && buildProgress) {
+    const headerColor = buildProgress.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
+    const headerLabel = buildProgress.gitEnabled ? 'building with git' : 'building';
+    content.innerHTML = `
+      <div class="card-header" style="font-size:12px;letter-spacing:.5px;padding:0 0 12px;color:${headerColor}">${headerLabel}</div>
+      ${renderBuild(buildProgress)}
+      ${buildProgress.done ? `<div class="action-panel"><button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back to explore</button></div>` : ''}`;
+    updateStats(buildProgress);
+  }
+
+  const qi = document.getElementById('query-input');
+  if (qi && queryVal) qi.value = queryVal;
+  const ri = document.getElementById('refine-input');
+  if (ri && refineVal) ri.value = refineVal;
 }
 
 // ── epoch sidebar ────────────────────────────────────────────────────────────
@@ -498,7 +567,7 @@ function renderEpochSidebar(tree, bp) {
       const color = colors[n.status] ?? 'var(--dim)';
       const icon  = icons[n.status]  ?? '○';
       return `
-        <div class="tree-row${isSelected ? ' selected' : ''}" onclick="selectNode('${n.nodeId}')">
+        <div class="tree-row${isSelected ? ' selected' : ''}" data-node-id="${n.nodeId}" onclick="selectNode('${n.nodeId}')">
           <span style="color:${color};font-size:12px;width:12px;flex-shrink:0">${icon}</span>
           <span class="node-label" title="${esc(n.problem)}">${esc(trunc(n.problem, 26))}</span>
         </div>`;
@@ -676,9 +745,16 @@ function renderInputScreen() {
 
 function renderRootReview() {
   const { rootProblem, rootAnalysis, loading, error } = state;
-  let analysisHtml = '';
 
-  if (!loading && rootAnalysis) {
+  if (loading) {
+    const label = pendingAction === 'root_approve' ? 'decomposing…'
+                : pendingAction === 'root_refine'  ? 'refining…'
+                : 'analyzing…';
+    return `<div class="loading-card"><div class="loading-spinner"></div>${label}</div>`;
+  }
+
+  let analysisHtml = '';
+  if (rootAnalysis) {
     const a = rootAnalysis;
     if (a.problem_statement) {
       analysisHtml += `<div class="detail-section"><h3>problem</h3><div style="line-height:1.6">${esc(a.problem_statement)}</div></div>`;
@@ -697,22 +773,21 @@ function renderRootReview() {
     <div class="card">
       <div class="card-header">root analysis · <span style="color:var(--text)">${esc(trunc(rootProblem ?? '', 50))}</span></div>
       <div class="card-body">
-        ${loading
-          ? '<div class="loading-text">analyzing…</div>'
-          : (analysisHtml || '<div class="loading-text">no analysis yet</div>')
-        }
+        ${analysisHtml || '<div class="loading-text">no analysis yet</div>'}
         ${error ? `<div class="error-msg" style="margin-top:8px">${esc(error)}</div>` : ''}
       </div>
     </div>
     ${!loading ? `
     <div class="action-panel">
       <div class="action-buttons">
-        <button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back</button>
-        <button class="btn btn-success" onclick="sendAction({type:'root_approve'})">approve & decompose →</button>
+        <button class="btn btn-ghost" onclick="sendAction({type:'back'})" ${pendingAction ? 'disabled' : ''}>← back</button>
+        <button class="btn btn-success" onclick="sendAction({type:'root_approve'})" ${pendingAction ? 'disabled' : ''}>
+          ${pendingAction === 'root_approve' ? 'processing…' : 'approve & decompose →'}
+        </button>
       </div>
       <div class="refine-row">
-        <input type="text" id="refine-input" class="input-text" placeholder="What should change? e.g. focus only on the API layer">
-        <button class="btn btn-secondary" onclick="sendRefine('root_refine')">refine</button>
+        <input type="text" id="refine-input" class="input-text" placeholder="What should change? e.g. focus only on the API layer" ${pendingAction ? 'disabled' : ''}>
+        <button class="btn btn-secondary" onclick="sendRefine('root_refine')" ${pendingAction ? 'disabled' : ''}>refine</button>
       </div>
     </div>` : ''}`;
 }
@@ -720,6 +795,49 @@ function renderRootReview() {
 function renderTraversalScreen() {
   const { traversal, loading, error } = state;
   if (!traversal && !loading) return '<div class="empty"><div>loading…</div></div>';
+
+  const { tree } = state;
+  const currentId = state.traversalNodeId;
+
+  // Always allow browsing other nodes — even while loading
+  if (selectedId && selectedId !== currentId && tree?.nodes?.[selectedId]) {
+    return `
+      ${renderNodeDetail(tree, selectedId)}
+      <div class="action-panel">
+        <button class="btn btn-ghost" onclick="selectNode('${currentId}')">← back to current node</button>
+      </div>`;
+  }
+
+  if (loading) {
+    const label = pendingAction === 'node_approve' ? 'decomposing…'
+                : pendingAction === 'node_refine'  ? 'refining…'
+                : 'thinking…';
+    const currentNode = tree?.nodes?.[currentId];
+    return `
+      <div class="card">
+        <div class="card-header" style="gap:8px">
+          <div class="loading-spinner"></div>
+          <span>${label}</span>
+        </div>
+        <div class="card-body">
+          ${currentNode ? `<div class="detail-problem">${esc(currentNode.problem)}</div>` : ''}
+          <div class="skeleton-group">
+            <div class="skeleton" style="width:88%"></div>
+            <div class="skeleton" style="width:72%"></div>
+            <div class="skeleton" style="width:80%"></div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // User clicked a different node — peek view (non-loading)
+  if (selectedId && selectedId !== traversal?.nodeId && tree?.nodes?.[selectedId]) {
+    return `
+      ${renderNodeDetail(tree, selectedId)}
+      <div class="action-panel">
+        <button class="btn btn-ghost" onclick="selectNode('${traversal?.nodeId}')">← back to current node</button>
+      </div>`;
+  }
 
   const nodeId   = traversal?.nodeId ?? '';
   const problem  = traversal?.problem ?? '';
@@ -732,9 +850,7 @@ function renderTraversalScreen() {
     : '<span class="tag decompose">will decompose</span>';
 
   let bodyHtml = '';
-  if (loading) {
-    bodyHtml = '<div class="loading-text">thinking…</div>';
-  } else if (isLeaf && traversal?.pendingSchema) {
+  if (isLeaf && traversal?.pendingSchema) {
     const s = traversal.pendingSchema;
     if (s.summary) bodyHtml += `<div style="color:var(--dim);margin-bottom:10px;font-size:12px;line-height:1.5">${esc(s.summary)}</div>`;
     if (s.functions?.length) {
@@ -788,12 +904,14 @@ function renderTraversalScreen() {
     ${!loading ? `
     <div class="action-panel">
       <div class="action-buttons">
-        <button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back</button>
-        <button class="btn btn-success" onclick="sendAction({type:'node_approve'})">approve →</button>
+        <button class="btn btn-ghost" onclick="sendAction({type:'back'})" ${pendingAction ? 'disabled' : ''}>← back</button>
+        <button class="btn btn-success" onclick="sendAction({type:'node_approve'})" ${pendingAction ? 'disabled' : ''}>
+          ${pendingAction === 'node_approve' ? 'processing…' : 'approve →'}
+        </button>
       </div>
       <div class="refine-row">
-        <input type="text" id="refine-input" class="input-text" placeholder="What should change?">
-        <button class="btn btn-secondary" onclick="sendRefine('node_refine')">refine</button>
+        <input type="text" id="refine-input" class="input-text" placeholder="What should change?" ${pendingAction ? 'disabled' : ''}>
+        <button class="btn btn-secondary" onclick="sendRefine('node_refine')" ${pendingAction ? 'disabled' : ''}>refine</button>
       </div>
     </div>` : ''}`;
 }
@@ -850,8 +968,37 @@ function renderContent() {
   sidebar.style.display = showSidebar ? '' : 'none';
 
   if (showSidebar && tree) {
-    document.getElementById('sidebar-tree').innerHTML   = renderTreeNode(tree, tree.root_id, 0);
-    document.getElementById('sidebar-epochs').innerHTML = renderEpochSidebar(tree, buildProgress);
+    // Only rebuild tree HTML when node count/structure changes
+    const treeKey = Object.keys(tree.nodes).sort().join(',');
+    if (treeKey !== lastTreeKey) {
+      lastTreeKey = treeKey;
+      document.getElementById('sidebar-tree').innerHTML = renderTreeNode(tree, tree.root_id, 0);
+    } else {
+      // Structure unchanged — just patch row classes in place
+      document.querySelectorAll('.tree-row[data-node-id]').forEach(el => {
+        const nid = el.dataset.nodeId;
+        const isCurrent = nid === state.traversalNodeId;
+        el.className = 'tree-row' + (isCurrent ? ' active' : nid === selectedId ? ' selected' : '');
+        const icon = el.querySelector('.node-icon');
+        if (icon) {
+          const status = nodeStatus(nid);
+          const node = tree.nodes[nid];
+          let cls = node?.is_leaf ? 'leaf' : 'internal';
+          if (status) cls = status;
+          else if (isCurrent) cls = 'running';
+          icon.className = `node-icon ${cls}`;
+        }
+      });
+    }
+
+    // Only rebuild epoch sidebar when epoch structure or node statuses change
+    const buildKey = buildProgress
+      ? buildProgress.epochs.map(e => e.nodes.map(n => n.nodeId + n.status).join('|')).join(';')
+      : '';
+    if (buildKey !== lastBuildKey) {
+      lastBuildKey = buildKey;
+      document.getElementById('sidebar-epochs').innerHTML = renderEpochSidebar(tree, buildProgress);
+    }
   }
 
   if (!screen || screen === 'input') {
@@ -937,6 +1084,8 @@ function connect() {
   es.onmessage = (e) => {
     clearTimeout(demoTimer);
     demoMode = false;
+    pendingAction = null;
+    if (!everConnected) { lastTreeKey = null; lastBuildKey = null; }
     document.getElementById('demo-banner').style.display = 'none';
     try {
       const next = JSON.parse(e.data);
