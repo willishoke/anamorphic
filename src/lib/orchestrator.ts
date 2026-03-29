@@ -1,15 +1,14 @@
 /**
- * Orchestrator: all app logic extracted from App.tsx with no Ink dependency.
- * Emits 'state' events with WebState whenever anything changes.
+ * Orchestrator: coordinates async work (LLM calls, builder) and dispatches
+ * events to the pure reducer. All state lives in this.state; transitions are
+ * handled by reduce(). Emits 'state' events with WebState for the web server.
  */
 import { EventEmitter } from 'events';
 import { LLMClient } from './llm.js';
-import {
-  AppScreen, TreeData, NodeData, LeafSchema, RootAnalysis,
-  BuildProgress, EpochInfo, NodeBuildStatus, TraversalInfo, WebState,
-} from './types.js';
+import { NodeData, TreeData, WebState, TraversalInfo } from './types.js';
 import { buildTree } from './builder.js';
 import { epochs } from './scheduler.js';
+import { AppState, AppEvent, initialState, reduce } from './state.js';
 
 // --------------------------------------------------------------------------
 
@@ -22,59 +21,44 @@ function makeNode(id: string, problem: string, parentId: string | null, depth: n
 
 // --------------------------------------------------------------------------
 
-interface TraversalState {
-  nodeId: string;
-  problem: string;
-  isLeaf: boolean;
-  queueLength: number;
-  totalSeen: number;
-  pendingSchema?: LeafSchema;
-  pendingSubproblems?: string[];
-}
-
 export class Orchestrator extends EventEmitter {
   private llm = new LLMClient();
+  private state: AppState = initialState();
 
-  private screen: AppScreen = { tag: 'input' };
-  private loading = false;
-  private error: string | undefined;
+  // ---- Dispatch & snapshot -------------------------------------------------
 
-  private rootRef: { problem: string; analysis: RootAnalysis } | null = null;
-  private treeRef: TreeData | null = null;
-  private queue: string[] = [];
-  private seen = 0;
-  private traversal: TraversalState | null = null;
-  private buildProgress: BuildProgress | null = null;
-
-  // ---- state snapshot -------------------------------------------------------
+  private dispatch(event: AppEvent): void {
+    this.state = reduce(this.state, event);
+    this.emit('state', this.getState());
+  }
 
   getState(): WebState {
+    const { screen, loading, error, tree, traversal, buildProgress } = this.state;
+
     const base: WebState = {
-      screen: this.screen.tag,
-      loading: this.loading,
-      error: this.error,
-      tree: this.treeRef,
-      traversalNodeId: this.traversal?.nodeId ?? null,
-      buildProgress: this.buildProgress,
+      screen: screen.tag,
+      loading,
+      error,
+      tree,
+      traversalNodeId: traversal?.nodeId ?? null,
+      buildProgress,
     };
 
-    if (this.screen.tag === 'root_review') {
-      const s = this.screen as Extract<AppScreen, { tag: 'root_review' }>;
-      return { ...base, rootProblem: s.problem, rootAnalysis: s.analysis };
+    if (screen.tag === 'root_review') {
+      return { ...base, rootProblem: screen.problem, rootAnalysis: screen.analysis };
     }
 
-    if (this.screen.tag === 'traversing' && this.traversal) {
-      const t = this.traversal;
+    if (screen.tag === 'traversing' && traversal) {
       return {
         ...base,
         traversal: {
-          nodeId: t.nodeId,
-          problem: t.problem,
-          isLeaf: t.isLeaf,
-          queueLength: t.queueLength,
-          totalSeen: t.totalSeen,
-          pendingSchema: t.pendingSchema,
-          pendingSubproblems: t.pendingSubproblems,
+          nodeId: traversal.nodeId,
+          problem: traversal.problem,
+          isLeaf: traversal.isLeaf,
+          queueLength: traversal.queueLength,
+          totalSeen: traversal.totalSeen,
+          pendingSchema: traversal.pendingSchema,
+          pendingSubproblems: traversal.pendingSubproblems,
         } satisfies TraversalInfo,
       };
     }
@@ -82,284 +66,191 @@ export class Orchestrator extends EventEmitter {
     return base;
   }
 
-  private push(): void {
-    this.emit('state', this.getState());
-  }
-
-  // ---- actions --------------------------------------------------------------
+  // ---- Public actions ------------------------------------------------------
 
   async submitQuery(query: string): Promise<void> {
-    this.error = undefined;
-    this.loading = true;
-    const rootId = '0';
     _counter = 1;
-    const rootNode = makeNode(rootId, query, null, 0);
-    this.treeRef = { root_id: rootId, nodes: { [rootId]: rootNode } };
-    this.push();
+    const rootNode = makeNode('0', query, null, 0);
+    this.dispatch({ type: 'QUERY_SUBMITTED', rootNode });
     try {
       const analysis = await this.llm.analyzeRoot(query);
-      this.rootRef = { problem: query, analysis };
-      this.loading = false;
-      this.screen = { tag: 'root_review', problem: query, analysis };
-      this.push();
+      this.dispatch({ type: 'ROOT_ANALYZED', problem: query, analysis });
     } catch (e) {
-      this.loading = false;
-      this.error = e instanceof Error ? e.message : String(e);
-      this.push();
+      this.dispatch({ type: 'ERROR', message: e instanceof Error ? e.message : String(e) });
     }
   }
 
   async approveRoot(): Promise<void> {
-    const rootId = '0';
     _counter = 1;
-    if (!this.treeRef) {
-      const problem = this.rootRef?.problem ?? '';
-      this.treeRef = { root_id: rootId, nodes: { [rootId]: makeNode(rootId, problem, null, 0) } };
+    // Tree may be null if the user went back from traversing then re-approved.
+    // Reconstruct it from rootRef in that case.
+    let tree = this.state.tree;
+    if (!tree) {
+      const problem = this.state.rootRef?.problem ?? '';
+      const rootNode = makeNode('0', problem, null, 0);
+      tree = { root_id: '0', nodes: { '0': rootNode } };
     }
-    this.queue = [this.treeRef.root_id];
-    this.seen = 0;
+    this.dispatch({ type: 'ROOT_APPROVED', rootId: tree.root_id, tree });
     await this.advanceTraversal();
   }
 
   async refineRoot(feedback: string): Promise<void> {
-    if (this.screen.tag !== 'root_review') return;
-    const s = this.screen as Extract<AppScreen, { tag: 'root_review' }>;
-    this.loading = true;
-    this.push();
+    const { screen } = this.state;
+    if (screen.tag !== 'root_review') return;
+    this.dispatch({ type: 'REFINE_ROOT_STARTED' });
     try {
-      const analysis = await this.llm.analyzeRoot(`${s.problem}\n\nUser refinement: ${feedback}`);
-      this.rootRef = { problem: s.problem, analysis };
-      this.loading = false;
-      this.screen = { tag: 'root_review', problem: s.problem, analysis };
-      this.push();
+      const analysis = await this.llm.analyzeRoot(`${screen.problem}\n\nUser refinement: ${feedback}`);
+      this.dispatch({ type: 'ROOT_ANALYZED', problem: screen.problem, analysis });
     } catch (e) {
-      this.loading = false;
-      this.error = e instanceof Error ? e.message : String(e);
-      this.push();
+      this.dispatch({ type: 'ERROR', message: e instanceof Error ? e.message : String(e) });
     }
   }
 
   async approveNode(): Promise<void> {
-    if (!this.traversal) return;
-    const tree = this.treeRef!;
-    const { nodeId, isLeaf, pendingSchema, pendingSubproblems } = this.traversal;
+    const { traversal, tree } = this.state;
+    if (!traversal || !tree) return;
+    const { nodeId, isLeaf, pendingSchema, pendingSubproblems } = traversal;
     const node = tree.nodes[nodeId]!;
 
     if (isLeaf) {
-      node.is_leaf = true;
-      node.schema = pendingSchema ?? null;
+      const updatedTree: TreeData = {
+        ...tree,
+        nodes: { ...tree.nodes, [nodeId]: { ...node, is_leaf: true, schema: pendingSchema ?? null } },
+      };
+      this.dispatch({ type: 'NODE_LEAF_COMMITTED', updatedTree });
     } else {
       const subs = pendingSubproblems ?? [];
-
       let deps: Record<string, number[]> = {};
       if (subs.length > 1) {
-        try { deps = await this.llm.identifyDeps(subs); } catch { /* skip */ }
+        try { deps = await this.llm.identifyDeps(subs); } catch { /* skip — deps are optional */ }
       }
 
+      // Build new child nodes and an updated parent
+      const newNodes: typeof tree.nodes = { ...tree.nodes };
       const childIds: string[] = [];
+      const updatedChildren: string[] = [];
+
       for (const sp of subs) {
         const childId = nextId();
         const child = makeNode(childId, sp, nodeId, node.depth + 1);
         child.dependencies = [...node.dependencies];
-        tree.nodes[childId] = child;
-        node.children.push(childId);
+        newNodes[childId] = child;
+        updatedChildren.push(childId);
         childIds.push(childId);
-        this.queue.push(childId);
       }
+      newNodes[nodeId] = { ...node, children: updatedChildren };
 
+      // Apply inter-sibling deps returned by identifyDeps
       for (const [idxStr, depIdxs] of Object.entries(deps)) {
         const idx = parseInt(idxStr);
         const childId = childIds[idx];
         if (!childId) continue;
-        const child = tree.nodes[childId]!;
+        const existing = newNodes[childId]!.dependencies;
+        const merged = [...existing];
         for (const depIdx of depIdxs) {
           const depId = childIds[depIdx];
-          if (depId && !child.dependencies.includes(depId)) {
-            child.dependencies.push(depId);
-          }
+          if (depId && !merged.includes(depId)) merged.push(depId);
         }
+        newNodes[childId] = { ...newNodes[childId]!, dependencies: merged };
       }
+
+      const updatedTree: TreeData = { ...tree, nodes: newNodes };
+      const updatedQueue = [...this.state.traversalQueue, ...childIds];
+      this.dispatch({ type: 'NODE_CHILDREN_ADDED', updatedTree, updatedQueue });
     }
 
-    this.treeRef = { ...tree };
     await this.advanceTraversal();
   }
 
   async refineNode(feedback: string): Promise<void> {
-    if (!this.traversal) return;
-    const { nodeId, isLeaf, pendingSchema, pendingSubproblems, problem } = this.traversal;
-    this.loading = true;
-    this.push();
+    const { traversal } = this.state;
+    if (!traversal) return;
+    const { isLeaf, pendingSchema, pendingSubproblems, problem } = traversal;
+    this.dispatch({ type: 'REFINE_NODE_STARTED' });
     try {
       if (isLeaf) {
         const schema = await this.llm.refinePlan(problem, pendingSchema!, feedback);
-        this.loading = false;
-        this.traversal = { ...this.traversal, pendingSchema: schema };
+        this.dispatch({ type: 'NODE_REFINED', schema });
       } else {
-        const subs = await this.llm.refineDecompose(problem, pendingSubproblems!, feedback);
-        this.loading = false;
-        this.traversal = { ...this.traversal, pendingSubproblems: subs };
+        const subproblems = await this.llm.refineDecompose(problem, pendingSubproblems!, feedback);
+        this.dispatch({ type: 'NODE_REFINED', subproblems });
       }
-      this.push();
     } catch (e) {
-      this.loading = false;
-      this.error = e instanceof Error ? e.message : String(e);
-      this.push();
+      this.dispatch({ type: 'ERROR', message: e instanceof Error ? e.message : String(e) });
     }
   }
 
   startBuild(git: boolean): void {
-    const tree = this.treeRef;
+    const { tree } = this.state;
     if (!tree) return;
-
+    const outputDir = 'output';
     const schedule = epochs(tree.nodes);
-    const initialEpochs: EpochInfo[] = schedule.map((nodeIds) => ({
-      nodes: nodeIds.map((id): NodeBuildStatus => ({
+    const initialEpochs = schedule.map((nodeIds) => ({
+      nodes: nodeIds.map((id) => ({
         nodeId: id,
         problem: tree.nodes[id]?.problem ?? id,
-        status: 'waiting',
+        status: 'waiting' as const,
       })),
     }));
-
-    const outputDir = 'output';
-    this.buildProgress = { epochs: initialEpochs, activeEpoch: -1, done: false, gitEnabled: git, outputDir };
-    this.screen = { tag: 'building' };
-    this.push();
-
-    const patchNode = (nodeId: string, patch: Partial<NodeBuildStatus>) => {
-      if (!this.buildProgress) return;
-      this.buildProgress = {
-        ...this.buildProgress,
-        epochs: this.buildProgress.epochs.map((e) => ({
-          ...e,
-          nodes: e.nodes.map((n) => n.nodeId === nodeId ? { ...n, ...patch } : n),
-        })),
-      };
-      this.push();
-    };
+    this.dispatch({ type: 'BUILD_STARTED', initialEpochs, git, outputDir });
 
     buildTree(tree.nodes, this.llm, {
       outputDir,
       git,
-      onGitError: (err) => {
-        if (this.buildProgress) {
-          this.buildProgress = { ...this.buildProgress, fatalError: `git init failed: ${err}`, gitEnabled: false };
-          this.push();
-        }
-      },
-      onEpochStart: (epochIdx) => {
-        if (this.buildProgress) {
-          this.buildProgress = { ...this.buildProgress, activeEpoch: epochIdx - 1 };
-          this.push();
-        }
-      },
-      onNodeStart: (nodeId) => patchNode(nodeId, { status: 'running' }),
-      onNodeGitStep: (nodeId, step) => patchNode(nodeId, { gitStep: step }),
-      onNodeCommit: (nodeId, commitCount) => patchNode(nodeId, { commitCount }),
-      onNodeDone: (result) => patchNode(result.nodeId, {
+      onGitError:    (err)           => this.dispatch({ type: 'BUILD_GIT_ERROR', error: err }),
+      onEpochStart:  (epochIdx)      => this.dispatch({ type: 'BUILD_EPOCH_STARTED', epochIdx: epochIdx - 1 }),
+      onNodeStart:   (nodeId)        => this.dispatch({ type: 'BUILD_NODE_STARTED', nodeId }),
+      onNodeGitStep: (nodeId, step)  => this.dispatch({ type: 'BUILD_NODE_GIT_STEP', nodeId, step }),
+      onNodeCommit:  (nodeId, count) => this.dispatch({ type: 'BUILD_NODE_COMMIT', nodeId, commitCount: count }),
+      onNodeDone:    (result)        => this.dispatch({
+        type: 'BUILD_NODE_DONE',
+        nodeId: result.nodeId,
         status: result.error ? 'error' : 'done',
         outputPath: result.outputPath,
         error: result.error,
         branchName: result.branchName,
         commitCount: result.commitCount,
-        gitStep: undefined,
       }),
-    }).then(() => {
-      if (this.buildProgress) {
-        this.buildProgress = { ...this.buildProgress, done: true };
-        this.push();
-      }
-    }).catch((e) => {
-      if (this.buildProgress) {
-        this.buildProgress = { ...this.buildProgress, done: true, fatalError: e instanceof Error ? e.message : String(e) };
-        this.push();
-      }
-    });
+    })
+      .then(() => this.dispatch({ type: 'BUILD_COMPLETE' }))
+      .catch((e) => this.dispatch({ type: 'BUILD_COMPLETE', fatalError: e instanceof Error ? e.message : String(e) }));
   }
 
   back(): void {
-    switch (this.screen.tag) {
-      case 'root_review':
-        this.treeRef = null;
-        this.queue = [];
-        this.seen = 0;
-        this.traversal = null;
-        this.error = undefined;
-        this.screen = { tag: 'input' };
-        break;
-      case 'traversing':
-        if (!this.rootRef) return;
-        this.treeRef = null;
-        this.queue = [];
-        this.seen = 0;
-        this.traversal = null;
-        this.screen = { tag: 'root_review', problem: this.rootRef.problem, analysis: this.rootRef.analysis };
-        break;
-      case 'explore':
-        if (!this.rootRef) return;
-        this.screen = { tag: 'root_review', problem: this.rootRef.problem, analysis: this.rootRef.analysis };
-        break;
-      case 'building': {
-        const tree = this.treeRef;
-        if (tree) this.screen = { tag: 'explore', tree: { ...tree } };
-        break;
-      }
-    }
-    this.push();
+    this.dispatch({ type: 'BACK' });
   }
 
-  // ---- internal -------------------------------------------------------------
+  // ---- Internal ------------------------------------------------------------
 
   private async advanceTraversal(): Promise<void> {
-    const tree = this.treeRef!;
+    const { traversalQueue, tree } = this.state;
 
-    if (this.queue.length === 0) {
-      this.traversal = null;
-      this.screen = { tag: 'explore', tree: { ...tree } };
-      this.push();
+    if (traversalQueue.length === 0) {
+      this.dispatch({ type: 'TRAVERSAL_COMPLETE' });
       return;
     }
 
-    const nodeId = this.queue.shift()!;
-    const node = tree.nodes[nodeId]!;
-    this.seen += 1;
-    this.loading = true;
-    this.screen = { tag: 'traversing', tree: { ...tree }, currentId: nodeId, nodeMarkdown: '' };
-    this.push();
+    const nodeId = traversalQueue[0];
+    const node = tree!.nodes[nodeId]!;
+    this.dispatch({ type: 'TRAVERSAL_NODE_LOADING', nodeId });
+
+    // Capture progress counts from the post-dispatch state (queue has been shifted)
+    const { traversalSeen: totalSeen, traversalQueue: remaining } = this.state;
+    const queueLength = remaining.length;
 
     try {
       const isLeaf = await this.llm.assess(node.problem);
 
       if (isLeaf) {
         const schema = await this.llm.structuredPlan(node.problem);
-        this.loading = false;
-        this.traversal = {
-          nodeId,
-          problem: node.problem,
-          isLeaf: true,
-          queueLength: this.queue.length,
-          totalSeen: this.seen,
-          pendingSchema: schema,
-        };
+        this.dispatch({ type: 'NODE_ASSESSED_LEAF', nodeId, problem: node.problem, schema, queueLength, totalSeen });
       } else {
-        const parentProblem = node.parent_id ? tree.nodes[node.parent_id]?.problem ?? '' : '';
+        const parentProblem = node.parent_id ? tree!.nodes[node.parent_id]?.problem ?? '' : '';
         const subproblems = await this.llm.decompose(node.problem, parentProblem);
-        this.loading = false;
-        this.traversal = {
-          nodeId,
-          problem: node.problem,
-          isLeaf: false,
-          queueLength: this.queue.length,
-          totalSeen: this.seen,
-          pendingSubproblems: subproblems,
-        };
+        this.dispatch({ type: 'NODE_ASSESSED_BRANCH', nodeId, problem: node.problem, subproblems, queueLength, totalSeen });
       }
-
-      this.push();
     } catch (e) {
-      this.loading = false;
-      this.error = e instanceof Error ? e.message : String(e);
-      this.push();
+      this.dispatch({ type: 'ERROR', message: e instanceof Error ? e.message : String(e) });
     }
   }
 }
