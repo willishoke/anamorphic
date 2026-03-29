@@ -192,6 +192,24 @@ main { flex: 1; display: flex; overflow: hidden; }
   padding: 6px 0;
 }
 .loading-text { color: var(--dim); font-size: 12px; }
+.loading-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 28px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--dim);
+  font-size: 13px;
+}
+.loading-spinner {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--cyan);
+  animation: spin-pulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
 
 /* ── Input screen ── */
 .input-screen {
@@ -712,9 +730,16 @@ function renderInputScreen() {
 
 function renderRootReview() {
   const { rootProblem, rootAnalysis, loading, error } = state;
-  let analysisHtml = '';
 
-  if (!loading && rootAnalysis) {
+  if (loading) {
+    const label = pendingAction === 'root_approve' ? 'decomposing…'
+                : pendingAction === 'root_refine'  ? 'refining…'
+                : 'analyzing…';
+    return `<div class="loading-card"><div class="loading-spinner"></div>${label}</div>`;
+  }
+
+  let analysisHtml = '';
+  if (rootAnalysis) {
     const a = rootAnalysis;
     if (a.problem_statement) {
       analysisHtml += `<div class="detail-section"><h3>problem</h3><div style="line-height:1.6">${esc(a.problem_statement)}</div></div>`;
@@ -733,10 +758,7 @@ function renderRootReview() {
     <div class="card">
       <div class="card-header">root analysis · <span style="color:var(--text)">${esc(trunc(rootProblem ?? '', 50))}</span></div>
       <div class="card-body">
-        ${loading
-          ? '<div class="loading-text">analyzing…</div>'
-          : (analysisHtml || '<div class="loading-text">no analysis yet</div>')
-        }
+        ${analysisHtml || '<div class="loading-text">no analysis yet</div>'}
         ${error ? `<div class="error-msg" style="margin-top:8px">${esc(error)}</div>` : ''}
       </div>
     </div>
@@ -759,6 +781,13 @@ function renderTraversalScreen() {
   const { traversal, loading, error } = state;
   if (!traversal && !loading) return '<div class="empty"><div>loading…</div></div>';
 
+  if (loading) {
+    const label = pendingAction === 'node_approve' ? 'decomposing…'
+                : pendingAction === 'node_refine'  ? 'refining…'
+                : 'thinking…';
+    return `<div class="loading-card"><div class="loading-spinner"></div>${label}</div>`;
+  }
+
   const nodeId   = traversal?.nodeId ?? '';
   const problem  = traversal?.problem ?? '';
   const isLeaf   = traversal?.isLeaf ?? false;
@@ -770,9 +799,7 @@ function renderTraversalScreen() {
     : '<span class="tag decompose">will decompose</span>';
 
   let bodyHtml = '';
-  if (loading) {
-    bodyHtml = '<div class="loading-text">thinking…</div>';
-  } else if (isLeaf && traversal?.pendingSchema) {
+  if (isLeaf && traversal?.pendingSchema) {
     const s = traversal.pendingSchema;
     if (s.summary) bodyHtml += `<div style="color:var(--dim);margin-bottom:10px;font-size:12px;line-height:1.5">${esc(s.summary)}</div>`;
     if (s.functions?.length) {
