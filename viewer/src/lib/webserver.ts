@@ -1,21 +1,34 @@
 /**
- * Minimal HTTP server that serves the web UI and pushes state via SSE.
- * No dependencies beyond Node stdlib.
+ * HTTP server: serves the web UI, pushes state via SSE, accepts POST /action.
  */
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import type { Orchestrator } from './orchestrator.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const HTML_PATH = path.join(__dirname, '../web/index.html');
+// Resolve HTML relative to CWD (the viewer/ directory) so the same source
+// file is served whether running from source or from a compiled dist/.
+const HTML_PATH = path.join(process.cwd(), 'src/web/index.html');
 
 let clients: http.ServerResponse[] = [];
 let cachedState = '{}';
 
-export function createWebServer(port = 7777): http.Server {
+export function createWebServer(port = 7777, orch?: Orchestrator): http.Server {
+  if (orch) {
+    orch.on('state', (s: unknown) => pushState(s));
+    pushState(orch.getState()); // seed initial state
+  }
+
   const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
 
     if (req.url === '/events') {
       res.writeHead(200, {
@@ -35,6 +48,31 @@ export function createWebServer(port = 7777): http.Server {
       return;
     }
 
+    if (req.method === 'POST' && req.url === '/action') {
+      if (!orch) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'no orchestrator' }));
+        return;
+      }
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        let action: Record<string, unknown>;
+        try {
+          action = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'bad json' }));
+          return;
+        }
+        // Respond immediately; long-running actions run in background
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        dispatchAction(orch, action);
+      });
+      return;
+    }
+
     fs.readFile(HTML_PATH, (err, data) => {
       if (err) { res.writeHead(500); res.end('web/index.html not found'); return; }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
@@ -44,6 +82,34 @@ export function createWebServer(port = 7777): http.Server {
 
   server.listen(port);
   return server;
+}
+
+function dispatchAction(orch: Orchestrator, action: Record<string, unknown>): void {
+  switch (action.type) {
+    case 'submit':
+      orch.submitQuery(String(action.query ?? '')).catch(console.error);
+      break;
+    case 'root_approve':
+      orch.approveRoot().catch(console.error);
+      break;
+    case 'root_refine':
+      orch.refineRoot(String(action.feedback ?? '')).catch(console.error);
+      break;
+    case 'node_approve':
+      orch.approveNode().catch(console.error);
+      break;
+    case 'node_refine':
+      orch.refineNode(String(action.feedback ?? '')).catch(console.error);
+      break;
+    case 'build':
+      orch.startBuild(Boolean(action.git));
+      break;
+    case 'back':
+      orch.back();
+      break;
+    default:
+      console.error('unknown action type:', action.type);
+  }
 }
 
 export function pushState(state: unknown): void {

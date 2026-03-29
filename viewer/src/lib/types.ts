@@ -34,7 +34,6 @@ export interface NodeData {
   plan: string | null;
   dependencies: string[];
   schema: LeafSchema | null;
-  // set during traversal before full tree is known
   subproblems?: string[];
 }
 
@@ -57,3 +56,59 @@ export type AppScreen =
   | { tag: 'traversing'; tree: TreeData; currentId: string; nodeMarkdown: string }
   | { tag: 'explore'; tree: TreeData }
   | { tag: 'building' };
+
+// ---- Build progress (moved from BuildScreen.tsx) ----
+
+export type NodeStatus = 'waiting' | 'running' | 'done' | 'error';
+
+export interface NodeBuildStatus {
+  nodeId: string;
+  problem: string;
+  status: NodeStatus;
+  outputPath?: string;
+  error?: string;
+  branchName?: string;
+  commitCount?: number;
+  gitStep?: string;
+}
+
+export interface EpochInfo {
+  nodes: NodeBuildStatus[];
+}
+
+export interface BuildProgress {
+  epochs: EpochInfo[];
+  activeEpoch: number; // 0-based, -1 = not started
+  done: boolean;
+  fatalError?: string;
+  gitEnabled?: boolean;
+  outputDir?: string;
+}
+
+// ---- Traversal state (for orchestrator → web) ----
+
+export interface TraversalInfo {
+  nodeId: string;
+  problem: string;
+  isLeaf: boolean;
+  queueLength: number;
+  totalSeen: number;
+  pendingSchema?: LeafSchema;
+  pendingSubproblems?: string[];
+}
+
+// ---- Web state (pushed over SSE) ----
+
+export interface WebState {
+  screen: string;
+  loading: boolean;
+  error?: string;
+  tree: TreeData | null;
+  traversalNodeId: string | null;
+  buildProgress: BuildProgress | null;
+  // root_review
+  rootProblem?: string;
+  rootAnalysis?: RootAnalysis;
+  // traversing
+  traversal?: TraversalInfo;
+}

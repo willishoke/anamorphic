@@ -126,6 +126,89 @@ main { flex: 1; display: flex; overflow: hidden; }
 }
 .card-body { padding: 14px; }
 
+/* ── Interactive controls ── */
+.action-panel {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.action-buttons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: opacity .1s, filter .1s;
+  letter-spacing: .2px;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.15); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: var(--cyan); color: var(--bg); border-color: var(--cyan); font-weight: 600; }
+.btn-success { background: var(--green); color: var(--bg); border-color: var(--green); font-weight: 600; }
+.btn-secondary { background: var(--bg3); color: var(--text); border-color: var(--border); }
+.btn-ghost { background: transparent; color: var(--dim); border-color: transparent; }
+.btn-danger { background: transparent; color: var(--red); border-color: var(--red); }
+.refine-row { display: flex; gap: 8px; }
+.input-text {
+  flex: 1;
+  font-family: inherit;
+  font-size: 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color .15s;
+}
+.input-text:focus { border-color: var(--cyan); }
+.input-text::placeholder { color: var(--dim); }
+.input-large {
+  font-family: inherit;
+  font-size: 13px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 10px 12px;
+  outline: none;
+  resize: vertical;
+  min-height: 80px;
+  width: 100%;
+  line-height: 1.6;
+  transition: border-color .15px;
+}
+.input-large:focus { border-color: var(--cyan); }
+.input-large::placeholder { color: var(--dim); }
+.error-msg {
+  color: var(--red);
+  font-size: 12px;
+  padding: 6px 0;
+}
+.loading-text { color: var(--dim); font-size: 12px; }
+
+/* ── Input screen ── */
+.input-screen {
+  max-width: 600px;
+  margin: 40px auto 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.input-screen .tagline {
+  color: var(--dim);
+  font-size: 12px;
+  margin-bottom: 4px;
+  line-height: 1.6;
+}
+
 /* ── Build progress ── */
 .epoch-section { margin-bottom: 16px; }
 .epoch-heading {
@@ -146,7 +229,6 @@ main { flex: 1; display: flex; overflow: hidden; }
 }
 .badge.active { background: var(--cyan); color: var(--bg); border-color: var(--cyan); }
 .badge.done   { background: var(--green); color: var(--bg); border-color: var(--green); }
-
 .build-row {
   display: flex;
   align-items: center;
@@ -171,6 +253,7 @@ main { flex: 1; display: flex; overflow: hidden; }
 .tag { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 10px; margin-right: 4px; }
 .tag.leaf { background: color-mix(in srgb, var(--yellow) 15%, transparent); color: var(--yellow); border: 1px solid var(--yellow); }
 .tag.internal { background: color-mix(in srgb, var(--blue) 15%, transparent); color: var(--blue); border: 1px solid var(--blue); }
+.tag.decompose { background: color-mix(in srgb, var(--purple) 15%, transparent); color: var(--purple); border: 1px solid var(--purple); }
 
 /* ── Waiting ── */
 .empty { text-align: center; padding: 60px 20px; color: var(--dim); line-height: 2; }
@@ -224,7 +307,7 @@ main { flex: 1; display: flex; overflow: hidden; }
 </head>
 <body>
 
-<div class="demo-banner" id="demo-banner" style="display:none">demo mode — <a href="https://github.com/willishoke/anamorphic" style="color:var(--yellow)">run locally</a> to connect your own session</div>
+<div class="demo-banner" id="demo-banner" style="display:none">demo mode — <a href="https://github.com/rhizomeicdev/anamorphic" style="color:var(--yellow)">run locally</a> to use interactively</div>
 <header>
   <span class="logo">anamorphic</span>
   <span class="screen" id="hdr-screen">connecting…</span>
@@ -233,7 +316,7 @@ main { flex: 1; display: flex; overflow: hidden; }
 </header>
 
 <main>
-  <div class="sidebar">
+  <div class="sidebar" id="sidebar" style="display:none">
     <div class="sidebar-tabs">
       <div class="sidebar-tab active" id="tab-tree" onclick="setTab('tree')">tree</div>
       <div class="sidebar-tab" id="tab-epochs" onclick="setTab('epochs')">epochs</div>
@@ -244,8 +327,7 @@ main { flex: 1; display: flex; overflow: hidden; }
   <div class="content" id="content">
     <div class="empty">
       <div class="big">○</div>
-      <div>waiting for anamorphic…</div>
-      <div style="font-size:11px;margin-top:8px">start the CLI, then refresh</div>
+      <div>connecting…</div>
     </div>
   </div>
 </main>
@@ -256,6 +338,7 @@ main { flex: 1; display: flex; overflow: hidden; }
 // ── demo state ────────────────────────────────────────────────────────────────
 const DEMO_STATE = {
   screen: 'building',
+  loading: false,
   tree: {
     root_id: 'n0',
     nodes: {
@@ -300,6 +383,8 @@ const trunc = (s, n) => s.length > n ? s.slice(0, n) + '…' : s;
 let state = {};
 let selectedId = null;
 let sidebarTab = 'tree';
+let demoMode = false;
+let everConnected = false;
 
 function setTab(tab) {
   sidebarTab = tab;
@@ -307,6 +392,39 @@ function setTab(tab) {
   document.getElementById('tab-epochs').className = 'sidebar-tab' + (tab === 'epochs' ? ' active' : '');
   document.getElementById('sidebar-tree').style.display   = tab === 'tree'   ? '' : 'none';
   document.getElementById('sidebar-epochs').style.display = tab === 'epochs' ? '' : 'none';
+}
+
+// ── action dispatch ──────────────────────────────────────────────────────────
+async function sendAction(action) {
+  if (demoMode) return;
+  try {
+    await fetch('/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(action),
+    });
+  } catch (e) {
+    console.error('action failed', e);
+  }
+}
+
+function submitQuery() {
+  const el = document.getElementById('query-input');
+  const q = el ? el.value.trim() : '';
+  if (!q) return;
+  sendAction({ type: 'submit', query: q });
+}
+
+function sendRefine(type) {
+  const el = document.getElementById('refine-input');
+  const f = el ? el.value.trim() : '';
+  if (!f) return;
+  el.value = '';
+  sendAction({ type, feedback: f });
+}
+
+function startBuild(git) {
+  sendAction({ type: 'build', git });
 }
 
 // ── node status from build progress ──────────────────────────────────────────
@@ -360,7 +478,7 @@ function renderTreeNode(tree, nodeId, depth) {
 
 function selectNode(id) {
   selectedId = selectedId === id ? null : id;
-  renderAll();
+  renderContent();
 }
 
 // ── epoch sidebar ────────────────────────────────────────────────────────────
@@ -400,11 +518,6 @@ function renderEpochSidebar(tree, bp) {
 
 // ── build progress ─────────────────────────────────────────────────────────
 function renderBuild(bp) {
-  const total   = bp.epochs.flatMap(e => e.nodes).length;
-  const done    = bp.epochs.flatMap(e => e.nodes).filter(n => n.status === 'done').length;
-  const running = bp.epochs.flatMap(e => e.nodes).filter(n => n.status === 'running').length;
-  const errors  = bp.epochs.flatMap(e => e.nodes).filter(n => n.status === 'error').length;
-
   let html = '';
   bp.epochs.forEach((epoch, ei) => {
     const isActive = ei === bp.activeEpoch;
@@ -421,11 +534,11 @@ function renderBuild(bp) {
         <div class="card-body" style="padding:8px 14px">`;
 
     epoch.nodes.forEach(n => {
-      const icons = { waiting:'○', running:'◉', done:'✓', error:'✗' };
+      const icons  = { waiting:'○', running:'◉', done:'✓', error:'✗' };
       const colors = { waiting:'var(--dim)', running:'var(--cyan)', done:'var(--green)', error:'var(--red)' };
-      const icon = icons[n.status] ?? '○';
-      const color = colors[n.status] ?? 'var(--dim)';
-      const right = n.status === 'running'
+      const icon   = icons[n.status]  ?? '○';
+      const color  = colors[n.status] ?? 'var(--dim)';
+      const right  = n.status === 'running'
         ? (n.gitStep ?? 'generating…') + (n.commitCount ? `  ${n.commitCount} commits` : '')
         : n.status === 'done'
         ? (n.branchName ? `<span class="build-branch">${esc(trunc(n.branchName, 30))}</span>` + (n.commitCount ? ` · ${n.commitCount}` : '') : '')
@@ -442,6 +555,8 @@ function renderBuild(bp) {
   });
 
   if (bp.done) {
+    const allNodes = bp.epochs.flatMap(e => e.nodes);
+    const errors = allNodes.filter(n => n.status === 'error').length;
     const summary = errors > 0
       ? `<span style="color:var(--yellow)">⚠ complete — ${errors} error(s)</span>`
       : `<span style="color:var(--green)">✓ build complete</span>`;
@@ -452,46 +567,24 @@ function renderBuild(bp) {
     html += `<div class="card" style="border-color:var(--red)"><div class="card-body" style="color:var(--red)">${esc(bp.fatalError)}</div></div>`;
   }
 
-  const statsEl = document.getElementById('stats');
-  statsEl.style.display = 'flex';
-  statsEl.innerHTML = `
-    <span><b>${total}</b> nodes</span>
-    <span style="color:var(--green)"><b>${done}</b> done</span>
-    ${running ? `<span style="color:var(--cyan)"><b>${running}</b> running</span>` : ''}
-    ${errors  ? `<span style="color:var(--red)"><b>${errors}</b> errors</span>` : ''}
-    ${bp.outputDir ? `<span style="margin-left:auto;color:var(--dim)">→ ${esc(bp.outputDir)}</span>` : ''}
-  `;
-
   return html;
 }
 
 // ── node detail ────────────────────────────────────────────────────────────
-function renderNodeDetail(tree, nodeId) {
-  const node = tree?.nodes?.[nodeId];
-  if (!node) return '<div class="empty"><div>select a node</div></div>';
-
-  const typeTag = node.is_leaf
-    ? '<span class="tag leaf">leaf</span>'
-    : '<span class="tag internal">internal</span>';
-  const depthTag = `<span class="tag" style="background:var(--bg3);color:var(--dim);border:1px solid var(--border)">depth ${node.depth}</span>`;
-  const buildInfo = nodeBuildInfo(nodeId);
-
-  let html = `
-    <div class="card">
-      <div class="card-header">node ${esc(nodeId)} ${typeTag} ${depthTag}</div>
-      <div class="card-body">
-        <div class="detail-problem">${esc(node.problem)}</div>`;
+function renderNodeDetailBody(node) {
+  let html = '';
+  const buildInfo = nodeBuildInfo(node.id);
 
   if (buildInfo) {
     const colors = { waiting:'var(--dim)', running:'var(--cyan)', done:'var(--green)', error:'var(--red)' };
     const color = colors[buildInfo.status] ?? 'var(--dim)';
     html += `<div style="color:${color};margin-bottom:8px;font-size:12px">`;
     if (buildInfo.status === 'running') html += `◉ ${buildInfo.gitStep ?? 'generating…'}`;
-    if (buildInfo.status === 'done') html += `✓ done`;
-    if (buildInfo.status === 'error') html += `✗ ${esc(buildInfo.error ?? 'error')}`;
+    if (buildInfo.status === 'done')    html += `✓ done`;
+    if (buildInfo.status === 'error')   html += `✗ ${esc(buildInfo.error ?? 'error')}`;
     if (buildInfo.status === 'waiting') html += `○ waiting`;
     if (buildInfo.commitCount) html += `  · ${buildInfo.commitCount} commits`;
-    if (buildInfo.branchName) html += `<div class="build-branch" style="margin-top:4px">${esc(buildInfo.branchName)}</div>`;
+    if (buildInfo.branchName)  html += `<div class="build-branch" style="margin-top:4px">${esc(buildInfo.branchName)}</div>`;
     html += `</div>`;
   }
 
@@ -532,74 +625,282 @@ function renderNodeDetail(tree, nodeId) {
     if (s.estimated_lines) html += `<div style="color:var(--dim);font-size:11px;margin-top:8px">~${s.estimated_lines} lines estimated</div>`;
   }
 
-  if (node.children.length) {
+  if (node.children?.length) {
     html += `<div class="detail-section" style="margin-top:12px"><h3>children (${node.children.length})</h3>`;
     node.children.forEach(cid => {
-      const child = tree.nodes[cid];
+      const child = state.tree?.nodes?.[cid];
       if (child) html += `<div class="detail-item">${esc(trunc(child.problem, 60))}</div>`;
     });
     html += `</div>`;
   }
 
-  html += `</div></div>`;
   return html;
 }
 
-// ── main render ───────────────────────────────────────────────────────────
+function renderNodeDetail(tree, nodeId) {
+  const node = tree?.nodes?.[nodeId];
+  if (!node) return '<div class="empty"><div>select a node</div></div>';
+
+  const typeTag = node.is_leaf
+    ? '<span class="tag leaf">leaf</span>'
+    : '<span class="tag internal">internal</span>';
+  const depthTag = `<span class="tag" style="background:var(--bg3);color:var(--dim);border:1px solid var(--border)">depth ${node.depth}</span>`;
+
+  return `
+    <div class="card">
+      <div class="card-header">node ${esc(nodeId)} ${typeTag} ${depthTag}</div>
+      <div class="card-body">
+        <div class="detail-problem">${esc(node.problem)}</div>
+        ${renderNodeDetailBody(node)}
+      </div>
+    </div>`;
+}
+
+// ── screen renderers ─────────────────────────────────────────────────────────
+
+function renderInputScreen() {
+  const loading = state.loading;
+  const error   = state.error;
+  return `
+    <div class="input-screen">
+      <div class="tagline">describe a software system to build → get a decomposition tree + parallel implementation plan</div>
+      <textarea id="query-input" class="input-large" placeholder="Build a URL shortener service…" rows="4" ${loading ? 'disabled' : ''}></textarea>
+      ${error ? `<div class="error-msg">${esc(error)}</div>` : ''}
+      <div class="action-buttons">
+        <button class="btn btn-primary" onclick="submitQuery()" ${loading ? 'disabled' : ''}>
+          ${loading ? 'analyzing…' : 'analyze →'}
+        </button>
+      </div>
+    </div>`;
+}
+
+function renderRootReview() {
+  const { rootProblem, rootAnalysis, loading, error } = state;
+  let analysisHtml = '';
+
+  if (!loading && rootAnalysis) {
+    const a = rootAnalysis;
+    if (a.problem_statement) {
+      analysisHtml += `<div class="detail-section"><h3>problem</h3><div style="line-height:1.6">${esc(a.problem_statement)}</div></div>`;
+    }
+    if (a.key_components?.length) {
+      analysisHtml += `<div class="detail-section"><h3>key components</h3>`;
+      a.key_components.forEach(c => { analysisHtml += `<div class="detail-item">${esc(c)}</div>`; });
+      analysisHtml += `</div>`;
+    }
+    if (a.scope_assessment) {
+      analysisHtml += `<div class="detail-section"><h3>scope</h3><div style="color:var(--dim);line-height:1.6">${esc(a.scope_assessment)}</div></div>`;
+    }
+  }
+
+  return `
+    <div class="card">
+      <div class="card-header">root analysis · <span style="color:var(--text)">${esc(trunc(rootProblem ?? '', 50))}</span></div>
+      <div class="card-body">
+        ${loading
+          ? '<div class="loading-text">analyzing…</div>'
+          : (analysisHtml || '<div class="loading-text">no analysis yet</div>')
+        }
+        ${error ? `<div class="error-msg" style="margin-top:8px">${esc(error)}</div>` : ''}
+      </div>
+    </div>
+    ${!loading ? `
+    <div class="action-panel">
+      <div class="action-buttons">
+        <button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back</button>
+        <button class="btn btn-success" onclick="sendAction({type:'root_approve'})">approve & decompose →</button>
+      </div>
+      <div class="refine-row">
+        <input type="text" id="refine-input" class="input-text" placeholder="What should change? e.g. focus only on the API layer">
+        <button class="btn btn-secondary" onclick="sendRefine('root_refine')">refine</button>
+      </div>
+    </div>` : ''}`;
+}
+
+function renderTraversalScreen() {
+  const { traversal, loading, error } = state;
+  if (!traversal && !loading) return '<div class="empty"><div>loading…</div></div>';
+
+  const nodeId   = traversal?.nodeId ?? '';
+  const problem  = traversal?.problem ?? '';
+  const isLeaf   = traversal?.isLeaf ?? false;
+  const qLen     = traversal?.queueLength ?? 0;
+  const seen     = traversal?.totalSeen ?? 0;
+
+  const typeTag = isLeaf
+    ? '<span class="tag leaf">leaf</span>'
+    : '<span class="tag decompose">will decompose</span>';
+
+  let bodyHtml = '';
+  if (loading) {
+    bodyHtml = '<div class="loading-text">thinking…</div>';
+  } else if (isLeaf && traversal?.pendingSchema) {
+    const s = traversal.pendingSchema;
+    if (s.summary) bodyHtml += `<div style="color:var(--dim);margin-bottom:10px;font-size:12px;line-height:1.5">${esc(s.summary)}</div>`;
+    if (s.functions?.length) {
+      bodyHtml += `<div class="detail-section"><h3>functions</h3>`;
+      s.functions.forEach(f => {
+        bodyHtml += `<code class="detail-code">${esc(f.signature)}</code>`;
+        if (f.purpose) bodyHtml += `<div style="color:var(--dim);font-size:11px;padding-left:6px;margin-bottom:4px">${esc(f.purpose)}</div>`;
+      });
+      bodyHtml += `</div>`;
+    }
+    if (s.steps?.length) {
+      bodyHtml += `<div class="detail-section"><h3>steps</h3>`;
+      s.steps.forEach(step => bodyHtml += `<div class="detail-item">${esc(step)}</div>`);
+      bodyHtml += `</div>`;
+    }
+    if (s.edge_cases?.length) {
+      bodyHtml += `<div class="detail-section"><h3>edge cases</h3>`;
+      s.edge_cases.forEach(ec => bodyHtml += `<div class="detail-item">${esc(ec)}</div>`);
+      bodyHtml += `</div>`;
+    }
+    if (s.data_structures?.length) {
+      bodyHtml += `<div class="detail-section"><h3>data structures</h3>`;
+      s.data_structures.forEach(ds => {
+        bodyHtml += `<code class="detail-code">${esc(ds.name)}</code>`;
+        if (ds.fields?.length) ds.fields.forEach(f => bodyHtml += `<div style="color:var(--dim);font-size:11px;padding-left:6px">${esc(f.name)}: ${esc(f.type)}</div>`);
+      });
+      bodyHtml += `</div>`;
+    }
+    if (s.estimated_lines) bodyHtml += `<div style="color:var(--dim);font-size:11px;margin-top:8px">~${s.estimated_lines} lines estimated</div>`;
+  } else if (!isLeaf && traversal?.pendingSubproblems?.length) {
+    bodyHtml += `<div class="detail-section"><h3>subproblems (${traversal.pendingSubproblems.length})</h3>`;
+    traversal.pendingSubproblems.forEach((sp, i) => {
+      bodyHtml += `<div class="detail-item"><span style="color:var(--dim);margin-right:4px">${i+1}.</span>${esc(sp)}</div>`;
+    });
+    bodyHtml += `</div>`;
+  }
+
+  return `
+    <div class="card">
+      <div class="card-header">
+        ${typeTag}
+        <span style="color:var(--text)">${esc(trunc(nodeId, 6))}</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--dim)">${seen} seen · ${qLen} queued</span>
+      </div>
+      <div class="card-body">
+        <div class="detail-problem">${esc(problem)}</div>
+        ${bodyHtml}
+        ${error ? `<div class="error-msg" style="margin-top:8px">${esc(error)}</div>` : ''}
+      </div>
+    </div>
+    ${!loading ? `
+    <div class="action-panel">
+      <div class="action-buttons">
+        <button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back</button>
+        <button class="btn btn-success" onclick="sendAction({type:'node_approve'})">approve →</button>
+      </div>
+      <div class="refine-row">
+        <input type="text" id="refine-input" class="input-text" placeholder="What should change?">
+        <button class="btn btn-secondary" onclick="sendRefine('node_refine')">refine</button>
+      </div>
+    </div>` : ''}`;
+}
+
+function renderExploreContent() {
+  const { tree } = state;
+  if (!tree) return '<div class="empty"><div>no tree</div></div>';
+  const nodeHtml = renderNodeDetail(tree, selectedId ?? tree.root_id);
+
+  return `
+    ${nodeHtml}
+    <div class="action-panel">
+      <div class="action-buttons">
+        <button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back</button>
+        <button class="btn btn-primary" onclick="startBuild(false)">build</button>
+        <button class="btn btn-secondary" onclick="startBuild(true)">build with git</button>
+      </div>
+    </div>`;
+}
+
+// ── stats bar update ─────────────────────────────────────────────────────────
+function updateStats(bp) {
+  const statsEl = document.getElementById('stats');
+  if (!bp) { statsEl.style.display = 'none'; return; }
+  const allNodes = bp.epochs.flatMap(e => e.nodes);
+  const total   = allNodes.length;
+  const done    = allNodes.filter(n => n.status === 'done').length;
+  const running = allNodes.filter(n => n.status === 'running').length;
+  const errors  = allNodes.filter(n => n.status === 'error').length;
+  statsEl.style.display = 'flex';
+  statsEl.innerHTML = `
+    <span><b>${total}</b> nodes</span>
+    <span style="color:var(--green)"><b>${done}</b> done</span>
+    ${running ? `<span style="color:var(--cyan)"><b>${running}</b> running</span>` : ''}
+    ${errors  ? `<span style="color:var(--red)"><b>${errors}</b> errors</span>` : ''}
+    ${bp.outputDir ? `<span style="margin-left:auto;color:var(--dim)">→ ${esc(bp.outputDir)}</span>` : ''}
+  `;
+}
+
+// ── main render ───────────────────────────────────────────────────────────────
+function renderContent() {
+  const { screen, tree, buildProgress } = state;
+
+  // save inputs before clobbering DOM
+  const queryVal  = document.getElementById('query-input')?.value  ?? '';
+  const refineVal = document.getElementById('refine-input')?.value ?? '';
+
+  const content = document.getElementById('content');
+  const sidebar = document.getElementById('sidebar');
+  const stats   = document.getElementById('stats');
+  stats.style.display = 'none';
+
+  const showSidebar = screen === 'traversing' || screen === 'explore' || screen === 'building';
+  sidebar.style.display = showSidebar ? '' : 'none';
+
+  if (showSidebar && tree) {
+    document.getElementById('sidebar-tree').innerHTML   = renderTreeNode(tree, tree.root_id, 0);
+    document.getElementById('sidebar-epochs').innerHTML = renderEpochSidebar(tree, buildProgress);
+  }
+
+  if (!screen || screen === 'input') {
+    content.innerHTML = renderInputScreen();
+  } else if (screen === 'root_review') {
+    content.innerHTML = renderRootReview();
+  } else if (screen === 'traversing') {
+    content.innerHTML = renderTraversalScreen();
+  } else if (screen === 'explore') {
+    content.innerHTML = renderExploreContent();
+  } else if (screen === 'building' && buildProgress) {
+    const headerColor = buildProgress.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
+    const headerLabel = buildProgress.gitEnabled ? 'building with git' : 'building';
+    content.innerHTML = `
+      <div class="card-header" style="font-size:12px;letter-spacing:.5px;padding:0 0 12px;color:${headerColor}">${headerLabel}</div>
+      ${renderBuild(buildProgress)}
+      ${buildProgress.done ? `<div class="action-panel"><button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back to explore</button></div>` : ''}`;
+    updateStats(buildProgress);
+  } else {
+    content.innerHTML = `<div class="empty"><div class="big" style="color:var(--green)">●</div><div>connected</div></div>`;
+  }
+
+  // restore inputs
+  const qi = document.getElementById('query-input');
+  if (qi && queryVal) qi.value = queryVal;
+  const ri = document.getElementById('refine-input');
+  if (ri && refineVal) ri.value = refineVal;
+}
+
 function renderAll() {
-  const { screen, tree, buildProgress, traversalNodeId } = state;
+  const { screen, tree } = state;
   const screenName = screen ?? 'connecting';
 
   // header
   document.getElementById('hdr-screen').textContent = screenName;
   const pill = document.getElementById('hdr-pill');
   if (tree) {
-    const nodes = Object.values(tree.nodes);
+    const nodes  = Object.values(tree.nodes);
     const leaves = nodes.filter(n => n.is_leaf).length;
-    pill.style.display = '';
-    pill.textContent = `${nodes.length} nodes · ${leaves} leaves`;
+    pill.style.display  = '';
+    pill.textContent    = `${nodes.length} nodes · ${leaves} leaves`;
   } else {
     pill.style.display = 'none';
   }
 
-  // sidebars
-  const sidebarTree   = document.getElementById('sidebar-tree');
-  const sidebarEpochs = document.getElementById('sidebar-epochs');
-  sidebarTree.innerHTML   = tree ? renderTreeNode(tree, tree.root_id, 0) : '<div class="empty" style="padding:20px"><div>no tree yet</div></div>';
-  sidebarEpochs.innerHTML = renderEpochSidebar(tree, state.buildProgress);
-
-  // content
-  const content = document.getElementById('content');
-  const stats   = document.getElementById('stats');
-
-  if (tree) {
-    stats.style.display = 'none';
-    content.innerHTML = renderNodeDetail(tree, selectedId ?? tree.root_id);
-  } else if (screen === 'building' && buildProgress) {
-    const headerColor = buildProgress.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
-    const headerLabel = buildProgress.gitEnabled ? 'building with git' : 'building';
-    content.innerHTML = `
-      <div class="card-header" style="font-size:12px;letter-spacing:.5px;padding:0 0 12px;color:${headerColor}">${headerLabel}</div>
-      ${renderBuild(buildProgress)}`;
-  } else if (tree) {
-    stats.style.display = 'none';
-    const focusId = traversalNodeId ?? tree.root_id;
-    const label = screen === 'traversing' ? 'traversing' : screen === 'explore' ? 'explore' : '';
-    content.innerHTML = `
-      ${label ? `<div style="color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.7px;margin-bottom:8px">${label}</div>` : ''}
-      ${renderNodeDetail(tree, focusId)}`;
-  } else {
-    stats.style.display = 'none';
-    if (everConnected) {
-      content.innerHTML = `<div class="empty"><div class="big" style="color:var(--green)">●</div><div>connected</div><div style="font-size:11px;margin-top:8px">enter a problem in the terminal to begin</div></div>`;
-    } else {
-      content.innerHTML = `<div class="empty"><div class="big">○</div><div>waiting for anamorphic…</div><div style="font-size:11px;margin-top:8px">start the CLI, then refresh</div></div>`;
-    }
-  }
+  renderContent();
 }
 
-// ── demo mode ─────────────────────────────────────────────────────────────
-let demoMode = false;
+// ── demo mode ─────────────────────────────────────────────────────────────────
 function activateDemo() {
   if (demoMode) return;
   demoMode = true;
@@ -611,8 +912,7 @@ function activateDemo() {
   renderAll();
 }
 
-// ── SSE connection ────────────────────────────────────────────────────────
-let everConnected = false;
+// ── SSE connection ────────────────────────────────────────────────────────────
 let demoTimer;
 function connect() {
   const pulse = document.getElementById('pulse');
@@ -628,7 +928,7 @@ function connect() {
     pulse.className = 'pulse';
     es.close();
     if (!everConnected) {
-      activateDemo();
+      demoTimer = setTimeout(activateDemo, 1500);
       return;
     }
     document.getElementById('hdr-screen').textContent = 'disconnected — retrying…';
@@ -640,7 +940,6 @@ function connect() {
     document.getElementById('demo-banner').style.display = 'none';
     try {
       const next = JSON.parse(e.data);
-      // auto-select active traversal node
       if (next.traversalNodeId && next.traversalNodeId !== state.traversalNodeId) {
         selectedId = next.traversalNodeId;
       }
