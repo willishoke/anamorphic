@@ -472,7 +472,7 @@ function renderTreeNode(tree, nodeId, depth) {
   const children = node.children.map(id => renderTreeNode(tree, id, depth + 1)).join('');
   return `
     <div class="tree-node">
-      <div class="tree-row ${rowClass}" onclick="selectNode('${nodeId}')">
+      <div class="tree-row ${rowClass}" data-node-id="${nodeId}" onclick="selectNode('${nodeId}')">
         <div class="node-icon ${iconClass}"></div>
         <span class="node-label" title="${esc(node.problem)}">${esc(label)}</span>
         <span class="node-meta">${meta}</span>
@@ -483,7 +483,36 @@ function renderTreeNode(tree, nodeId, depth) {
 
 function selectNode(id) {
   selectedId = selectedId === id ? null : id;
-  renderContent();
+
+  // Update tree row highlight without rebuilding the DOM
+  document.querySelectorAll('.tree-row[data-node-id]').forEach(el => {
+    const nid = el.dataset.nodeId;
+    const isCurrent = nid === state.traversalNodeId;
+    el.className = 'tree-row' + (isCurrent ? ' active' : nid === selectedId ? ' selected' : '');
+  });
+
+  // Re-render content area only (not the sidebar tree)
+  const { screen, tree, buildProgress } = state;
+  const content = document.getElementById('content');
+  const queryVal  = document.getElementById('query-input')?.value  ?? '';
+  const refineVal = document.getElementById('refine-input')?.value ?? '';
+
+  if (screen === 'explore') {
+    content.innerHTML = renderExploreContent();
+  } else if (screen === 'building' && buildProgress) {
+    const headerColor = buildProgress.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
+    const headerLabel = buildProgress.gitEnabled ? 'building with git' : 'building';
+    content.innerHTML = `
+      <div class="card-header" style="font-size:12px;letter-spacing:.5px;padding:0 0 12px;color:${headerColor}">${headerLabel}</div>
+      ${renderBuild(buildProgress)}
+      ${buildProgress.done ? `<div class="action-panel"><button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back to explore</button></div>` : ''}`;
+    updateStats(buildProgress);
+  }
+
+  const qi = document.getElementById('query-input');
+  if (qi && queryVal) qi.value = queryVal;
+  const ri = document.getElementById('refine-input');
+  if (ri && refineVal) ri.value = refineVal;
 }
 
 // ── epoch sidebar ────────────────────────────────────────────────────────────
@@ -503,7 +532,7 @@ function renderEpochSidebar(tree, bp) {
       const color = colors[n.status] ?? 'var(--dim)';
       const icon  = icons[n.status]  ?? '○';
       return `
-        <div class="tree-row${isSelected ? ' selected' : ''}" onclick="selectNode('${n.nodeId}')">
+        <div class="tree-row${isSelected ? ' selected' : ''}" data-node-id="${n.nodeId}" onclick="selectNode('${n.nodeId}')">
           <span style="color:${color};font-size:12px;width:12px;flex-shrink:0">${icon}</span>
           <span class="node-label" title="${esc(n.problem)}">${esc(trunc(n.problem, 26))}</span>
         </div>`;
