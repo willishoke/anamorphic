@@ -535,12 +535,7 @@ function selectNode(id) {
   } else if (screen === 'traversing') {
     content.innerHTML = renderTraversalScreen();
   } else if (screen === 'building' && buildProgress) {
-    const headerColor = buildProgress.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
-    const headerLabel = buildProgress.gitEnabled ? 'building with git' : 'building';
-    content.innerHTML = `
-      <div class="card-header" style="font-size:12px;letter-spacing:.5px;padding:0 0 12px;color:${headerColor}">${headerLabel}</div>
-      ${renderBuild(buildProgress)}
-      ${buildProgress.done ? `<div class="action-panel"><button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back to explore</button></div>` : ''}`;
+    content.innerHTML = renderBuildingScreen();
     updateStats(buildProgress);
   }
 
@@ -586,6 +581,20 @@ function renderEpochSidebar(tree, bp) {
 }
 
 // ── build progress ─────────────────────────────────────────────────────────
+function renderBuildingScreen() {
+  const { tree, buildProgress: bp } = state;
+  if (!bp) return '';
+  const headerColor = bp.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
+  const headerLabel = bp.gitEnabled ? 'building with git' : 'building';
+  const body = (selectedId && tree?.nodes?.[selectedId])
+    ? renderNodeDetail(tree, selectedId)
+    : renderBuild(bp);
+  return `
+    <div class="card-header" style="font-size:12px;letter-spacing:.5px;padding:0 0 12px;color:${headerColor}">${headerLabel}</div>
+    ${body}
+    ${bp.done ? `<div class="action-panel"><button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back to explore</button></div>` : ''}`;
+}
+
 function renderBuild(bp) {
   let html = '';
   bp.epochs.forEach((epoch, ei) => {
@@ -1010,12 +1019,7 @@ function renderContent() {
   } else if (screen === 'explore') {
     content.innerHTML = renderExploreContent();
   } else if (screen === 'building' && buildProgress) {
-    const headerColor = buildProgress.gitEnabled ? 'var(--purple)' : 'var(--cyan)';
-    const headerLabel = buildProgress.gitEnabled ? 'building with git' : 'building';
-    content.innerHTML = `
-      <div class="card-header" style="font-size:12px;letter-spacing:.5px;padding:0 0 12px;color:${headerColor}">${headerLabel}</div>
-      ${renderBuild(buildProgress)}
-      ${buildProgress.done ? `<div class="action-panel"><button class="btn btn-ghost" onclick="sendAction({type:'back'})">← back to explore</button></div>` : ''}`;
+    content.innerHTML = renderBuildingScreen();
     updateStats(buildProgress);
   } else {
     content.innerHTML = `<div class="empty"><div class="big" style="color:var(--green)">●</div><div>connected</div></div>`;
